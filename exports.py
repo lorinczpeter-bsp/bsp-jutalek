@@ -338,8 +338,6 @@ def make_pdf(plan):
         canvas.drawString(199,height-44,plan["contact"])
         canvas.setFont("Fira",9)
         canvas.drawString(199,height-60,"Elszámolási hónap: "+plan["month"]+"   |   Jutalék: 10%")
-        canvas.setFont("FiraBold",8)
-        canvas.drawRightString(width-18,height-25,plan["status"])
         canvas.setStrokeColor(navy);canvas.setLineWidth(1.5)
         canvas.line(18,height-76,width-18,height-76)
         canvas.setFillColor(navy);canvas.setFont("Fira",7)

@@ -11,7 +11,7 @@ from ui_features import show_reassign,show_payments,show_analytics
 from web_session import session_store,settings_backup,restore_panel
 
 ROOT=Path(__file__).parent
-st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo.png"),layout="wide")
+st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo_ui.png"),layout="wide")
 
 def auth():
     password=os.environ.get("JUTALEK_PASSWORD","")
@@ -22,7 +22,7 @@ def auth():
     if not password:
         return
     if not st.session_state.get("authenticated"):
-        st.image(str(ROOT/"assets"/"logo.png"),width=240)
+        st.image(str(ROOT/"assets"/"logo_ui.png"),width=240)
         st.title("Jutalékelszámolás")
         entered=st.text_input("Belépési jelszó",type="password")
         if st.button("Belépés",type="primary"):
@@ -71,7 +71,7 @@ div.stDownloadButton>button{border:1px solid #D1D5DB;border-radius:9px;backgroun
 
 store=session_store(st.session_state)
 with st.sidebar:
-    st.image(str(ROOT/"assets"/"logo.png"),width=230)
+    st.image(str(ROOT/"assets"/"logo_ui.png"),width=230)
     st.markdown("## Jutalékelszámolás")
     st.caption("ALVÁLLALKOZÓI FUVAROK")
     st.markdown("**10% jutalék · HUF elszámolás**")
@@ -80,7 +80,7 @@ with st.sidebar:
     st.caption("A feltöltött adatok ebben a munkamenetben maradnak. Az átsorolásokat és árfolyamokat JSON-mentéssel viheted tovább.")
     st.download_button("Beállítások mentése (JSON)",settings_backup(store),
         file_name=f"jutalek_beallitasok_{today()}.json",mime="application/json")
-    st.caption("v2.1.0 · Streamlit web")
+    st.caption("v2.1.1 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
