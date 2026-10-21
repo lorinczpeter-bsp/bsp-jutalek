@@ -6,6 +6,7 @@ import pandas as pd
 from core import origin,build_plan,dec,today
 from exports import ft
 from persistence import persist_choice
+from runtime_cache import cached_analytics
 from settlement import overrides,analytics,resolved_months
 
 def money_display(frame):
@@ -84,7 +85,7 @@ def show_analytics(st,store,bundle):
     if not selected_contacts or not selected_months:st.info('Válassz legalább egy fuvarszervezőt és egy hónapot.');return
     if errors:st.error(f'{len(errors)} hibás importált sor miatt az elemzés hiányos lehet.')
     with st.spinner('Elemzés és havi árfolyamok előkészítése...'):
-        rows,issues=analytics(records,headers,store,selected_months,selected_contacts)
+        rows,issues=cached_analytics(st.session_state,store,source_hash,records,headers,selected_months,selected_contacts,analytics)
     for issue in issues:st.error(issue)
     unresolved=[r.key for r in records if r.contact in selected_contacts and resolved[r.key] is None and any(m in selected_months for m in r.months)]
     if unresolved:st.warning('Még nincs eldöntve a hónap, ezért nincs benne a számokban: '+', '.join(unresolved))

@@ -15,18 +15,22 @@ from exports import make_excel, make_pdf
 from web_session import restore_settings, settings_backup
 
 
-def apply_event(store, event):
+def apply_event_connection(c, event):
     validate_setting_event(event)
+    action, key = event['action'], event['freight']
+    if action == 'decision':
+        c.execute('INSERT OR REPLACE INTO decisions VALUES(?,?,?,?)',
+                  (key, event['signature'], event['month'], event['note']))
+    elif action == 'override':
+        c.execute('INSERT OR REPLACE INTO overrides VALUES(?,?,?,?)',
+                  (key, event['month'], event['note'], event['created']))
+    else:
+        c.execute('DELETE FROM overrides WHERE freight=?', (key,))
+
+
+def apply_event(store, event):
     with store.connect() as c:
-        action, key = event['action'], event['freight']
-        if action == 'decision':
-            c.execute('INSERT OR REPLACE INTO decisions VALUES(?,?,?,?)',
-                      (key, event['signature'], event['month'], event['note']))
-        elif action == 'override':
-            c.execute('INSERT OR REPLACE INTO overrides VALUES(?,?,?,?)',
-                      (key, event['month'], event['note'], event['created']))
-        else:
-            c.execute('DELETE FROM overrides WHERE freight=?', (key,))
+        apply_event_connection(c, event)
         store.bump(c)
 
 
@@ -37,8 +41,10 @@ def restore_history(store, snapshots, events):
         staging = Store(Path(tmp)/'settings.db')
         if latest:
             restore_settings(staging, json.dumps(latest['settings']).encode())
-        for event in events:
-            apply_event(staging, event)
+        with staging.connect() as connection:
+            for event in events:
+                apply_event_connection(connection, event)
+            staging.bump(connection)
         payload = json.loads(settings_backup(staging))
     with store.connect() as c:
         for table in ('decisions','overrides'):
@@ -92,6 +98,7 @@ class ExportJob:
         self.status = ''
         self.error = ''
         self.finished = False
+        self.completed_count = 0
 
     def download(self, kind):
         with self.lock:
@@ -125,3 +132,5 @@ class ExportJob:
                 self.error = str(exc) if isinstance(exc, ValueError) else 'A mentés nem sikerült. Próbáld újra a letöltést.'
                 self.status = ''; self.finished = True
                 raise RuntimeError('A letöltés nem indult el: ' + self.error) from exc
+            finally:
+                self.completed_count += 1

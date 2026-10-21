@@ -1,7 +1,7 @@
 # Streamlit Community Cloud – telepítés
 
 1. A csomag Babolna_Sped_Jutalek mappájának tartalmát tedd egy GitHub-repozitórium gyökerébe.
-   Az app.py, requirements.txt, core.py, settlement.py, ui_features.py, web_session.py, exports.py, drive_archive.py, archive_ui.py, auto_check.py, persistence.py,
+   Az app.py, requirements.txt, core.py, settlement.py, ui_features.py, web_session.py, exports.py, drive_archive.py, archive_ui.py, auto_check.py, persistence.py, runtime_cache.py,
    assets mappa és .streamlit/config.toml maradjon együtt. A .streamlit mappa rejtett lehet a fájlkezelőben.
 2. Nyisd meg a https://share.streamlit.io/ oldalt és hozz létre új alkalmazást.
 3. Válaszd ki a repozitóriumot, az ágat és belépési fájlként az app.py-t.
@@ -9,8 +9,8 @@
    `app_password = "a-sajat-jelszavad"`. Ehhez mintát ad a .streamlit/secrets.toml.example.
 5. Indítsd el a telepítést (Deploy). A függőségeket a requirements.txt alapján telepíti a rendszer.
 
-## Frissítés v2.4.0-ra
-A csomag összes alkalmazásfájlját frissítsd, különösen az új persistence.py fájlt és a requirements.txt fájlt.
+## Frissítés v2.4.1-re
+A csomag összes alkalmazásfájlját frissítsd, különösen a persistence.py, runtime_cache.py és requirements.txt fájlt.
 A kattintásra előállított, mentéssel összekötött letöltéshez Streamlit 1.59 vagy újabb szükséges.
 A meglévő Streamlit Secrets és Drive-mappa változatlanul használható.
 
@@ -26,3 +26,18 @@ A meglévő Streamlit Secrets és Drive-mappa változatlanul használható.
 Hivatalos dokumentáció:
 https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/file-organization
 https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/app-dependencies
+
+## A telepítési csomag tartalma
+A ZIP kizárólag a Streamlit Cloud alkalmazásfájljait, szükséges képeket és betűkészleteket,
+a konfigurációt, Secrets-mintát és használati/telepítési útmutatókat tartalmazza.
+Nincs Windows-indító BAT, helyi virtuális környezet, adatbázis, tesztfájl vagy requirements-dev.txt.
+Ha korábbi feltöltésből az INDÍTÁS.bat, requirements-dev.txt vagy test_*.py fájlok még a GitHub-tárolóban vannak,
+azokat töröld; egy új csomag feltöltése a régi fájlokat önmagában nem távolítja el.
+
+## Futási optimalizálás
+A forrás beolvasása tartalmi változásig újrahasznosítható ugyanabban a munkamenetben.
+A számítás és elemzés a forrás, beállítások vagy kiválasztás változásakor számol újra.
+A hónapbesorolások lekérdezése kötegelt. A Drive-tartalom csak változott módosítási időnél olvasódik újra;
+az archívumlista frissítése megmarad. Az új mentésekből hónaponként és személyenként a legutóbbi szükséges változatot olvassa,
+a régi archívumformátumok kompatibilitása mellett. A gyorsítótárak munkamenetenként különülnek el.
+A letöltési állapot lekérdezése csak folyamatban lévő letöltésnél ismétlődik.

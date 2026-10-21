@@ -1,4 +1,4 @@
-# Bábolna Sped – Alvállalkozói jutalékelszámolás v2.4.0
+# Bábolna Sped – Alvállalkozói jutalékelszámolás v2.4.1
 
 ## Napi használat
 1. Töltsd fel a teljes eredeti XLSX-fuvarlistát, a korábbi három hónap adataival és minden fuvarszervezővel.

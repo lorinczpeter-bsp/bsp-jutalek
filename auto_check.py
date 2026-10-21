@@ -9,6 +9,7 @@ from core import today
 from drive_archive import ArchiveError, build_snapshot, compare_snapshots
 from web_session import settings_backup
 from persistence import restore_history
+from runtime_cache import relevant_archives, drive_objects
 
 
 def previous_months(day, count=3):
@@ -25,10 +26,13 @@ def inherit_settings(store, snapshots):
     restore_history(store, snapshots, [])
 
 
-def check_history(raw, name, store, snapshots, months, rate_provider=None):
-    from core import load_workbook, origin
+def check_history(raw, name, store, snapshots, months, rate_provider=None, parsed=None):
+    from core import load_workbook
+    from settlement import resolved_months
     results = []
-    records = load_workbook(raw)[1]
+    parsed = parsed if parsed is not None else load_workbook(raw)
+    records = parsed[1]
+    resolved = resolved_months(records, store)
     ordered = sorted(snapshots, key=lambda s: s['created'], reverse=True)
     for month in months:
         candidates = [s for s in ordered if month in s['months']]
@@ -48,11 +52,11 @@ def check_history(raw, name, store, snapshots, months, rate_provider=None):
                     row_dates[key] = snapshot['created']
         active_keys = {k for k,r in old_rows.items() if r['month'] == month}
         current_contacts = set(by_contact) | {r.contact for r in records if r.key in active_keys}
-        unknown = sorted({r.contact for r in records if origin(r,store) == month} - current_contacts)
+        unknown = sorted({r.contact for r in records if resolved[r.key] == month} - current_contacts)
         baseline = dict(candidates[0], months=[month], records=old_rows)
         try:
             current = build_snapshot(raw, name, store, [month], rate_provider=rate_provider,
-                                     contacts=sorted(current_contacts))
+                                     contacts=sorted(current_contacts), parsed=parsed)
             current['records'] = {k:r for k,r in current['records'].items()
                                   if r['contact'] in by_contact or k in active_keys}
             result = compare_snapshots(baseline, current, [month])
@@ -80,8 +84,11 @@ def show_auto_check(st, store, raw, name):
         if refresh or st.session_state.get('auto_history_source') != source_key:
             with st.spinner('Korábbi mentések és hónapbesorolások beolvasása…'):
                 files = client.list_snapshots()
-                snapshots = [client.load(f['id'])[0] for f in files]
-                events = [client.load_setting_event(f) for f in client.list_setting_events()]
+                files = relevant_archives(files, months)
+                snapshots = drive_objects(st.session_state, client.folder_id, files,
+                                          lambda f: client.load(f['id'])[0], 'drive_snapshot_cache', 12)
+                events = drive_objects(st.session_state, client.folder_id, client.list_setting_events(),
+                                       client.load_setting_event, 'drive_event_cache', 2000, newest_first=False)
                 # A verified write can briefly lag in Drive's list index. Keep
                 # its local copy until listed so a rerun cannot undo the choice.
                 local = st.session_state.setdefault('confirmed_choice_events', {})
@@ -102,7 +109,9 @@ def show_auto_check(st, store, raw, name):
         cached = st.session_state.get('auto_history_result')
         if cached is None or cached[0] != signature:
             with st.spinner('Korábbi hónapok összehasonlítása…'):
-                results = check_history(raw, name, store, snapshots, months)
+                bundle = st.session_state.get('source_bundle')
+                parsed = bundle[1:] if bundle and bundle[0] == source_key[1] else None
+                results = check_history(raw, name, store, snapshots, months, parsed=parsed)
             signature = (source_key, tuple(months), hashlib.sha256(settings_backup(store)).hexdigest())
             st.session_state['auto_history_result'] = (signature, results)
         results = st.session_state['auto_history_result'][1]

@@ -1,4 +1,4 @@
-# Automatikus Drive-mentés beállítása – v2.4.0
+# Automatikus Drive-mentés beállítása – v2.4.1
 
 Excel vagy PDF letöltésekor a kiválasztott fuvarszervező adott havi kész kimutatása automatikusan mentődik.
 A ZIP tartalma az eredeti forrás, beállítások, számítások, kész Excel és PDF.
@@ -8,7 +8,7 @@ Azonos forrás és kimutatás Excel/PDF-letöltése közös mentést használ. A
 ## 1. Frissítsd az alkalmazás fájljait
 A csomag Babolna_Sped_Jutalek mappájának tartalmát másold a GitHub-tároló gyökerébe.
 Új a persistence.py; frissítendő az app.py, core.py, settlement.py, ui_features.py,
-web_session.py, exports.py, drive_archive.py, archive_ui.py, auto_check.py és requirements.txt is.
+web_session.py, exports.py, drive_archive.py, archive_ui.py, auto_check.py, runtime_cache.py és requirements.txt is.
 A meglévő Secrets és mappa változatlanul használható. Nincs szükség külön archívumfülre vagy kézi mentésre.
 Titkot vagy üzleti Excelt ne tölts fel a GitHubra.
 

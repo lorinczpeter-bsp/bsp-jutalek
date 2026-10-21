@@ -17,7 +17,7 @@ from core import (CONTACT, CURRENCY, DATE, KEY, MARGIN, build_plan, dec,
                   load_workbook, origin, valid_month)
 from web_session import settings_backup
 
-APP_VERSION = '2.4.0'
+APP_VERSION = '2.4.1'
 CALC_VERSION = 'commission-v2-mixed-monthly-fx'
 FORMAT = 'babolna-jutalek-archive-v1'
 MAX_SOURCE = 40 * 1024 * 1024
@@ -69,11 +69,11 @@ def canonical(record):
     return result
 
 
-def build_snapshot(raw, source_name, store, months, note='', rate_provider=None, contacts=None):
+def build_snapshot(raw, source_name, store, months, note='', rate_provider=None, contacts=None, parsed=None):
     """Capture the entire original source; verify calculations for explicit full months."""
     if not raw or len(raw) > MAX_SOURCE:
         raise ArchiveError('Üres vagy 40 MB-nál nagyobb forrásfájl.')
-    headers, records, errors = load_workbook(raw)
+    headers, records, errors = parsed if parsed is not None else load_workbook(raw)
     if errors:
         raise ArchiveError(f'{len(errors)} hibás forrássor miatt nem menthető ellenőrzött állapot.')
     if not records:
@@ -83,7 +83,11 @@ def build_snapshot(raw, source_name, store, months, note='', rate_provider=None,
         raise ArchiveError('Válassz legalább egy érvényes ellenőrzött hónapot.')
     contacts = sorted(set(contacts)) if contacts is not None else None
     scoped = [r for r in records if contacts is None or r.contact in contacts]
-    resolved = {r.key: origin(r, store) for r in records}
+    from settlement import resolved_months
+    resolved = resolved_months(records, store)
+    grouped = {}
+    for record in scoped:
+        grouped.setdefault(record.contact, []).append(record)
     pending = [r.key for r in scoped if resolved[r.key] is None and set(r.months) & set(months)]
     if pending:
         raise ArchiveError('Még nincs eldöntve az elszámolási hónap: ' + ', '.join(pending[:15]))
@@ -92,11 +96,11 @@ def build_snapshot(raw, source_name, store, months, note='', rate_provider=None,
     for month in months:
         month_contacts = sorted({r.contact for r in scoped if resolved[r.key] == month})
         for contact in month_contacts:
-            plan = build_plan(records, headers, store, month, contact, source_hash,
+            plan = build_plan(grouped[contact], headers, store, month, contact, source_hash,
                               snapshot=True, rate_provider=rate_provider)
             # MNB cache warming legitimately changes the local revision on the first pass.
             if plan['blockers'] == ['Az adatok számítás közben megváltoztak. Frissítsd az előnézetet.']:
-                plan = build_plan(records, headers, store, month, contact, source_hash,
+                plan = build_plan(grouped[contact], headers, store, month, contact, source_hash,
                                   snapshot=True, rate_provider=rate_provider)
             if plan['blockers']:
                 raise ArchiveError(f'{month} / {contact}: ' + '; '.join(plan['blockers']))
@@ -396,7 +400,7 @@ class DriveArchive:
         while True:
             params = {'q': f"'{self.folder_id}' in parents and trashed = false and "
                                "appProperties has { key='babolna_archive' and value='v1' }",
-                      'fields': 'nextPageToken,files(id,name,createdTime,appProperties,size)',
+                      'fields': 'nextPageToken,files(id,name,createdTime,modifiedTime,appProperties,size)',
                       'pageSize': 100, 'supportsAllDrives': 'true', 'includeItemsFromAllDrives': 'true',
                       'orderBy': 'createdTime desc'}
             if token:
@@ -438,6 +442,10 @@ class DriveArchive:
         metadata = {'name': name, 'parents': [self.folder_id], 'mimeType': 'application/zip',
                     'appProperties': {'babolna_archive': 'v1', 'snapshot_id': archive_id,
                                       'created': snapshot['created']}}
+        if snapshot.get('export_contact'):
+            metadata['appProperties'].update({
+                'report_month': snapshot['export_month'],
+                'report_person': hashlib.sha256(snapshot['export_contact'].encode()).hexdigest()})
         body = (f'--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'.encode() +
                 json.dumps(metadata).encode() +
                 f'\r\n--{boundary}\r\nContent-Type: application/zip\r\n\r\n'.encode() + data +
@@ -489,7 +497,7 @@ class DriveArchive:
         while True:
             params = {'q': f"'{self.folder_id}' in parents and trashed = false and "
                            "appProperties has { key='babolna_settings' and value='v1' }",
-                      'fields': 'nextPageToken,files(id,name,createdTime,appProperties,size)',
+                      'fields': 'nextPageToken,files(id,name,createdTime,modifiedTime,appProperties,size)',
                       'pageSize': 100, 'supportsAllDrives': 'true', 'includeItemsFromAllDrives': 'true',
                       'orderBy': 'createdTime asc'}
             if token:

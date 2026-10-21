@@ -12,6 +12,8 @@ from web_session import session_store,settings_backup
 from archive_ui import archive_client
 from persistence import ExportJob, persist_choice
 from auto_check import show_auto_check
+from runtime_cache import parsed_source, monthly_plan
+from settlement import resolved_months
 
 ROOT=Path(__file__).parent
 st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo_ui.png"),layout="wide")
@@ -88,7 +90,7 @@ with st.sidebar:
     st.caption("Árrés extra számlasorokkal • Teljesítés időpontja")
     st.divider()
     st.caption("A hónapdöntések automatikusan mentődnek. Excel vagy PDF letöltésekor a kész állapot a Drive-ra kerül.")
-    st.caption("v2.4.0 · Streamlit web")
+    st.caption("v2.4.1 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
@@ -96,8 +98,21 @@ feedback=st.session_state.pop("decision_feedback",None)
 if feedback:st.success(feedback)
 work_tab,reassign_tab,analytics_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Jutalékelemzés","Használat és beállítások"])
 
-@st.fragment(run_every="2s")
+def mark_download_started(job, target_count):
+    st.session_state['export_polling'] = True
+    st.session_state['polling_export_job'] = job
+    st.session_state['polling_export_target'] = target_count
+
+
+@st.fragment(run_every="2s" if st.session_state.get('export_polling') else None)
 def download_status(job):
+    active = st.session_state.get('polling_export_job', job)
+    if (active.completed_count >= st.session_state.get('polling_export_target', active.completed_count+1)
+            and st.session_state.get('export_polling')):
+        st.session_state['export_polling'] = False
+        st.session_state.pop('polling_export_job', None)
+        st.rerun()
+    job = active
     if job.error:
         st.error('A letöltéshez szükséges mentés nem sikerült: ' + job.error)
     elif job.status:
@@ -121,13 +136,15 @@ def downloads(plan,prefix):
     key = prefix + '_' + today().isoformat() + '_' + digest
     jobs = st.session_state.setdefault('export_jobs', {})
     if key not in jobs:
+        while len(jobs) >= 4:
+            jobs.pop(next(iter(jobs)))
         jobs[key] = ExportJob(client, st.session_state.source_raw, st.session_state.source_name, frozen, plan)
     job = jobs[key]
     stem = filename_stem(plan)
     a,b = st.columns(2)
     a.download_button('Excel letöltése',lambda: job.download('xlsx'),stem+'.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key=key+'_x',on_click='ignore')
-    b.download_button('PDF letöltése',lambda: job.download('pdf'),stem+'.pdf',mime='application/pdf',key=key+'_p',on_click='ignore')
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key=key+'_x',on_click=mark_download_started,args=(job,job.completed_count+1))
+    b.download_button('PDF letöltése',lambda: job.download('pdf'),stem+'.pdf',mime='application/pdf',key=key+'_p',on_click=mark_download_started,args=(job,job.completed_count+1))
     st.caption('Letöltéskor a kész Excel, PDF, forrás és hónapbesorolások automatikusan a Drive-ra mentődnek.')
     download_status(job)
 
@@ -204,7 +221,7 @@ with work_tab:
         st.session_state.source_name=getattr(uploaded,"name","fuvarlista.xlsx")
         source_hash=hashlib.sha256(raw).hexdigest()
         try:
-            headers,records,errors=load_workbook(raw)
+            source_hash,headers,records,errors=parsed_source(st.session_state,raw)
         except Exception as e:
             st.error(str(e));st.stop()
         st.caption(f"{len(records):,} feldolgozható tétel · {len(set(r.contact for r in records))} kapcsolattartó".replace(","," "))
@@ -214,7 +231,8 @@ with work_tab:
             st.stop()
         st.session_state.source_bundle=(source_hash,headers,records,errors)
         show_auto_check(st,store,raw,st.session_state.source_name)
-        all_months=sorted({m for r in records for m in r.months}|{origin(r,store) for r in records if origin(r,store)}|set(overrides(store).values()))
+        resolved_month_map=resolved_months(records,store)
+        all_months=sorted({m for r in records for m in r.months}|{m for m in resolved_month_map.values() if m}|set(overrides(store).values()))
         start=min(all_months)
         choices=all_months
         from datetime import timedelta
@@ -225,12 +243,12 @@ with work_tab:
         contact=b.selectbox("Saját kapcsolattartó",contacts)
         try:
             with st.spinner("Elszámolás és MNB-árfolyamok ellenőrzése…"):
-                plan=build_plan(records,headers,store,month,contact,source_hash,errors=errors,snapshot=True)
+                plan=monthly_plan(st.session_state,store,records,headers,source_hash,month,contact,errors)
         except ValueError as e:
             st.info(str(e));st.stop()
         inspect_tab,list_tab=st.tabs(["Ellenőrzések","Teljes forráslista"])
         cross=[r for r in records if len(r.months)>1 and month in r.months and r.contact==contact]
-        unresolved=[r for r in cross if origin(r,store) is None]
+        unresolved=[r for r in cross if resolved_month_map[r.key] is None]
         negatives=[r for r in plan["lines"] if r["negative"]]
         with inspect_tab:
             metrics=st.columns(3 if negatives else 2)
@@ -259,10 +277,10 @@ with work_tab:
                             st.session_state.decision_feedback=f"Sikeres hozzárendelés: {chosen.key} → {assigned}. A fuvar kikerült az ellenőrizendők közül."
                             st.rerun()
 
-            resolved=[r for r in cross if origin(r,store) is not None]
+            resolved=[r for r in cross if resolved_month_map[r.key] is not None]
             if resolved:
                 with st.expander(f"Rendezett hónap-hozzárendelések ({len(resolved)})"):
-                    st.dataframe(pd.DataFrame([{"Fuvarszám":r.key,"Elszámolási hónap":origin(r,store),"Dátumok":", ".join(r.dates).replace("-",".")} for r in resolved]),hide_index=True)
+                    st.dataframe(pd.DataFrame([{"Fuvarszám":r.key,"Elszámolási hónap":resolved_month_map[r.key],"Dátumok":", ".join(r.dates).replace("-",".")} for r in resolved]),hide_index=True)
             if negatives:
                 with st.expander("Negatív árrések - jutalékuk 0 Ft"):
                     st.dataframe(pd.DataFrame([{"Fuvarszám":r["key"],"Dátumok":str(r["original"].get(DATE,"")),
