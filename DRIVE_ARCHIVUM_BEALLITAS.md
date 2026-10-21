@@ -1,18 +1,16 @@
-# Drive-archívum beállítása – v2.2.0
+# Automatikus Drive-mentés beállítása – v2.4.0
 
-Az új funkció külön menti az eredeti forrás-Excelt, a pontos havi árfolyamokat,
-a hónapdöntéseket, az átsorolásokat és a kijelölt hónapok számított jutalékait.
-A mentés nem lezárás és nem kifizetés. Az app korábbi állapotot nem ír felül.
+Excel vagy PDF letöltésekor a kiválasztott fuvarszervező adott havi kész kimutatása automatikusan mentődik.
+A ZIP tartalma az eredeti forrás, beállítások, számítások, kész Excel és PDF.
+A hónapdöntések és átsorolások külön JSON-bejegyzésként azonnal mentődnek, a visszavonásokkal együtt.
+Azonos forrás és kimutatás Excel/PDF-letöltése közös mentést használ. A mentés nem kifizetés vagy havi lezárás.
 
 ## 1. Frissítsd az alkalmazás fájljait
-
-A csomag `Babolna_Sped_Jutalek` mappájának tartalma kerüljön a meglévő
-GitHub-tároló gyökerébe. Új fájlok: `drive_archive.py`, `archive_ui.py`,
-`DRIVE_ARCHIVUM_BEALLITAS.md`, `test_drive_archive.py`.
-Módosult az `app.py`, `requirements.txt`, `HASZNALAT.md`, `STREAMLIT_CLOUD.md`
-és a `.streamlit/secrets.toml.example` minta.
-A `core.py` számítási szabályai nem változtak.
-Valódi titkot, privát kulcsot vagy forrás-Excelt ne tölts fel a GitHubra.
+A csomag Babolna_Sped_Jutalek mappájának tartalmát másold a GitHub-tároló gyökerébe.
+Új a persistence.py; frissítendő az app.py, core.py, settlement.py, ui_features.py,
+web_session.py, exports.py, drive_archive.py, archive_ui.py, auto_check.py és requirements.txt is.
+A meglévő Secrets és mappa változatlanul használható. Nincs szükség külön archívumfülre vagy kézi mentésre.
+Titkot vagy üzleti Excelt ne tölts fel a GitHubra.
 
 ## 2. Válaszd ki a céges megosztott meghajtót
 
@@ -79,48 +77,28 @@ token_uri = "https://oauth2.googleapis.com/token"
 Mentsd a Secrets tartalmát, majd indítsd újra az appot, ha azt kéri.
 Új függőség a `google-auth`; ezt a friss `requirements.txt` telepíti.
 
-## 5. Első ellenőrzött állapot
+## 5. Első kész állapot és automatikus ellenőrzés
+1. Töltsd fel a teljes eredeti fuvarlistát a fő fülön.
+2. Rendezd a több hónapos fuvarokat; a döntések azonnal, visszaellenőrizve mentődnek a Drive-ra.
+3. Válassz hónapot és fuvarszervezőt, majd töltsd le az Excelt vagy PDF-et.
+4. A letöltés előtt elkészül a kész állapot mentése. A letöltés csak visszaellenőrzött mentés után indul.
 
-1. Töltsd fel a teljes eredeti fuvarlistát a szokásos fő fülön.
-2. Rendezd a több hónapos fuvarok hónapját; javítsd a hibás sorokat.
-3. A **Drive-archívum** fülön jelöld be a **Drive-archívum megnyitása** mezőt.
-4. Válaszd ki az **Ellenőrzött hónapok** listáját. A mentés ezek minden
-   fuvarszervezőjére vonatkozik, nem csak a fő fülön kiválasztott személyre.
-5. Ellenőrizd, hogy az export a hónapok minden fuvarját tartalmazza.
-   Ezt a program egy szűrt exportból nem tudja biztosan eldönteni.
-6. Erősítsd meg a teljességet, majd **Ellenőrzött állapot mentése**.
-7. Csak a Drive-ból visszaolvasott és egyeztetett mentés kap sikeres jelzést.
+Nincs külön archívumfül, kézi jóváhagyás vagy mentésgomb.
+Minden letöltött kimutatás az adott személy adott havi összehasonlítási alapját frissíti.
+Azonos változat két formátumának letöltése közös mentést használ egy munkamenetben.
+A ZIP-ben a teljes forrás és beállítások mellett mindkét kész kimenet megmarad.
+A hónapdöntések JSON-fájljai önmagukban nem kész pénzügyi állapotok.
 
-Korábbi eredeti forrás-Excelt is feltölthetsz és menthetsz első állapotként.
-Kézzel készített összesítő vagy korábbi kifizetési kimutatás nem teljes
-forráslista; azt továbbra is a **Korábbi kimutatás (opcionális)** fülön kezeld.
-A mentés ideje a tényleges mentés ideje; nem állítja, hogy a forrást már
-akkoriban archiválta a rendszer.
+Új feltöltésnél a fő fül automatikusan ellenőrzi az előző három naptári hónapot,
+hónaponként és fuvarszervezőnként a legutóbbi kész állapot alapján.
+A korábban kézzel mentett teljes havi archívumok is használhatók.
+A hiányzó alapot, hibás számítást, új / hiányzó fuvart, dátum-, hónap-,
+fuvarszervező-, árfolyam- és jutalékváltozást jelzi. Hiányzó sor esetén a szűrőket is ellenőrizni kell.
+A különbözet nem automatikus kifizetési javaslat. Korábbi kifizetési kimutatást már nem importálunk.
 
-## 6. Új feltöltés összehasonlítása
-
-A fő fülön feltöltött új forrást a **Drive-archívum** fülön az alapértelmezetten
-legújabb, illetve kiválasztott mentéssel hasonlítjuk össze. A megnyitott
-archívum az új forrás vagy a beállítások változásakor újra számol.
-
-Új munkamenetben az **Archivált beállítások átvétele** gombbal visszaállíthatod
-a régi átsorolásokat, dátumdöntéseket és pontos árfolyamokat. Előtte megerősítés
-szükséges, mert az azonos kulcsú helyi értékeket felülírja. Kifizetési jelölést
-nem állít vissza. Az eredeti Excel az archívumból le is tölthető.
-
-A lista mutatja az új / hiányzó fuvarokat, a változott mezők régi és új értékét,
-a hónap- és kapcsolattartóváltást, az árfolyamot és az esetleges számítási
-verzióeltérést. A havi, fuvarszervezőnkénti bontásban a számított teljes
-jutalék különbsége látható, kifizetési levonás nélkül.
-
-Csak mindkét állapotban ellenőrzött hónapok hasonlíthatók össze. Az alapban
-nem szereplő hónapokra nincs korábbi viszonyítás. A hiányzó sor nem bizonyít
-törlést: ellenőrizd az export időszakát és szűrőit. A negatív eltérés nem
-automatikus visszavonás, a pozitív eltérés nem automatikus ráfizetés.
-
-Az új állapot csak a külön mentésgombbal lesz későbbi összehasonlítási alap.
-A korábbi állapotok továbbra is választhatók. Több felhasználó mentése
-egymás mellett megmarad; lista frissítésével kérd le mások új mentéseit.
+Új belépés után a hónapdöntések automatikusan visszaállnak; a visszavonásuk is megmarad.
+Az Automatikus ellenőrzés frissítése gombbal ugyanahhoz a forráshoz is újraolvashatók a mentések.
+A korábbi forrás és kész kimenetek a Drive-on lévő ZIP-ekből visszakereshetők.
 
 ## Megőrzés és korlátok
 
@@ -139,7 +117,7 @@ egymás mellett megmarad; lista frissítésével kérd le mások új mentéseit.
   ismétli meg automatikusan, így a hibakezelés nem készít másodpéldányt.
 - Ha a visszaellenőrzés az újrapróbálások után is sikertelen, nem jelez
   igazolt mentést. Megkülönbözteti a már létrejött fájlt a még bizonytalan
-  feltöltéstől. Ilyenkor frissítsd az archívumlistát.
+  feltöltéstől. Ilyenkor próbáld újra ugyanazt a letöltést.
   Azonos állapot ismétlése meglévő azonosítóval
   visszaellenőrizhető anélkül, hogy új fájlt töltene fel.
 

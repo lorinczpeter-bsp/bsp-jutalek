@@ -393,29 +393,13 @@ def build_plan(records, headers, store, month, contact, source_hash, rate_provid
             "blockers":list(dict.fromkeys(blockers)),"warnings":warnings,"rates":rates,
             "revision":initial_revision,"start_month":start,"snapshot":snapshot,
             "created":datetime.now(ZoneInfo("Europe/Budapest")).isoformat(timespec="seconds")}
-    from settlement import payments
-    registry=payments(store) if snapshot else {}
-    paid_keys=[];actual_paid=Decimal(0);mismatches=[]
     for line in lines:
-        line["earned_commission"]=line["commission"]
-        line["paid"]=line["key"] in registry
-        if line["paid"]:
-            entry=registry[line["key"]]
-            line["payment"]=entry
-            actual_paid+=dec(entry["amount"])
-            if abs(dec(entry["amount"])-line["earned_commission"])>1 or entry["contact"]!=contact:
-                mismatches.append(line["key"])
-            line["commission"]=0
-            paid_keys.append(line["key"])
-    plan["earned_total"]=sum(x["earned_commission"] for x in lines)
-    plan["paid_total"]=sum(x["earned_commission"] for x in lines if x["paid"])
-    plan["actual_paid_total"]=str(actual_paid)
-    plan["paid_keys"]=paid_keys
-    plan["current"]=sum(x["commission"] for x in lines if x["kind"]=="Tárgyhavi")
-    plan["corrections"]=sum(x["commission"] for x in lines if x["kind"]!="Tárgyhavi")
-    plan["total"]=plan["current"]+plan["corrections"]
-    if paid_keys:plan["warnings"].append(f"{len(paid_keys)} fuvar kifizetettként nyilvántartva: újra fizetendő jutalékuk 0 Ft. Fuvarok: "+", ".join(paid_keys[:12])+(f" (+{len(paid_keys)-12} további fuvar)" if len(paid_keys)>12 else ""))
-    if mismatches:plan["warnings"].append("A korábbi kifizetés összege vagy fuvarszervezője eltér a jelenlegi számítástól; nincs automatikus ráfizetés: "+", ".join(mismatches))
+        line['earned_commission']=line['commission']
+        line['paid']=False
+    plan['earned_total']=sum(x['commission'] for x in lines)
+    plan['paid_total']=0
+    plan['actual_paid_total']='0'
+    plan['paid_keys']=[]
     if any(x["source_original"].get("Díj pénzneme")!=x["source_original"].get("Alvállalkozói díj pénzneme") for x in lines):
         plan["warnings"].append("Vegyes pénznemnél a díjakat az elszámolási hónap pontos árfolyamán forintosítjuk. Az Árrés extrákkal mező itt a számított árrés, HUF-ban; külön extra számlasorok nem adódnak hozzá.")
     return plan

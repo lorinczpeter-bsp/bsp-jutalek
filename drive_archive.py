@@ -17,7 +17,7 @@ from core import (CONTACT, CURRENCY, DATE, KEY, MARGIN, build_plan, dec,
                   load_workbook, origin, valid_month)
 from web_session import settings_backup
 
-APP_VERSION = '2.3.0'
+APP_VERSION = '2.4.0'
 CALC_VERSION = 'commission-v2-mixed-monthly-fx'
 FORMAT = 'babolna-jutalek-archive-v1'
 MAX_SOURCE = 40 * 1024 * 1024
@@ -69,7 +69,7 @@ def canonical(record):
     return result
 
 
-def build_snapshot(raw, source_name, store, months, note='', rate_provider=None):
+def build_snapshot(raw, source_name, store, months, note='', rate_provider=None, contacts=None):
     """Capture the entire original source; verify calculations for explicit full months."""
     if not raw or len(raw) > MAX_SOURCE:
         raise ArchiveError('Üres vagy 40 MB-nál nagyobb forrásfájl.')
@@ -81,15 +81,17 @@ def build_snapshot(raw, source_name, store, months, note='', rate_provider=None)
     months = sorted(set(months))
     if not months or any(not valid_month(m) for m in months):
         raise ArchiveError('Válassz legalább egy érvényes ellenőrzött hónapot.')
+    contacts = sorted(set(contacts)) if contacts is not None else None
+    scoped = [r for r in records if contacts is None or r.contact in contacts]
     resolved = {r.key: origin(r, store) for r in records}
-    pending = [r.key for r in records if resolved[r.key] is None and set(r.months) & set(months)]
+    pending = [r.key for r in scoped if resolved[r.key] is None and set(r.months) & set(months)]
     if pending:
         raise ArchiveError('Még nincs eldöntve az elszámolási hónap: ' + ', '.join(pending[:15]))
     calculated, rates = {}, {}
     source_hash = hashlib.sha256(raw).hexdigest()
     for month in months:
-        contacts = sorted({r.contact for r in records if resolved[r.key] == month})
-        for contact in contacts:
+        month_contacts = sorted({r.contact for r in scoped if resolved[r.key] == month})
+        for contact in month_contacts:
             plan = build_plan(records, headers, store, month, contact, source_hash,
                               snapshot=True, rate_provider=rate_provider)
             # MNB cache warming legitimately changes the local revision on the first pass.
@@ -106,7 +108,7 @@ def build_snapshot(raw, source_name, store, months, note='', rate_provider=None)
     rows = {}
     for record in records:
         month = resolved[record.key]
-        if month in months and record.key not in calculated:
+        if month in months and (contacts is None or record.contact in contacts) and record.key not in calculated:
             raise ArchiveError(f'{record.key}: hiányos számítás, nem menthető.')
         rows[record.key] = {'original': canonical(record), 'month': month,
                             'contact': record.contact, 'calculation': calculated.get(record.key)}
@@ -116,18 +118,22 @@ def build_snapshot(raw, source_name, store, months, note='', rate_provider=None)
         'created': datetime.now(ZoneInfo('Europe/Budapest')).isoformat(timespec='microseconds'),
         'source_name': str(source_name).replace('\\', '/').split('/')[-1][:200],
         'source_sha256': source_hash, 'months': months, 'note': note.strip()[:2000],
-        'records': rows, 'rates': rates, 'headers': headers,
+        'records': rows, 'rates': rates, 'headers': headers, 'contacts': contacts,
         'settings': json.loads(settings_backup(store)),
         # Intentionally no payment registry: an archive never establishes payment.
     }
 
 
-def encode_snapshot(snapshot, raw):
+def encode_snapshot(snapshot, raw, reports=None):
     if snapshot['source_sha256'] != hashlib.sha256(raw).hexdigest():
         raise ArchiveError('A forrásfájl és az állapot nem egyezik.')
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('source.xlsx', raw)
+        for name, content in (reports or {}).items():
+            if name not in ('report.xlsx', 'report.pdf'):
+                raise ArchiveError('Nem támogatott kimutatásfájl.')
+            z.writestr(name, content)
         z.writestr('snapshot.json', json.dumps(snapshot, ensure_ascii=False, sort_keys=True))
     data = out.getvalue()
     if len(data) > MAX_ARCHIVE:
@@ -141,7 +147,9 @@ def decode_snapshot(data):
         if len(data) > MAX_ARCHIVE:
             raise ValueError()
         with zipfile.ZipFile(io.BytesIO(data)) as z:
-            if sorted(z.namelist()) != ['snapshot.json', 'source.xlsx']:
+            names = z.namelist()
+            if (len(names) != len(set(names)) or not {'snapshot.json', 'source.xlsx'} <= set(names) or
+                set(names) - {'snapshot.json', 'source.xlsx', 'report.xlsx', 'report.pdf'}):
                 raise ValueError()
             if sum(i.file_size for i in z.infolist()) > MAX_EXPANDED:
                 raise ValueError()
@@ -149,6 +157,12 @@ def decode_snapshot(data):
             if len(raw) > MAX_SOURCE:
                 raise ValueError()
             snapshot = json.loads(z.read('snapshot.json'))
+            reports = snapshot.get('reports', {})
+            if set(names) - {'snapshot.json', 'source.xlsx'} != set(reports):
+                raise ValueError()
+            for name, expected in reports.items():
+                if hashlib.sha256(z.read(name)).hexdigest() != expected:
+                    raise ValueError()
         if not isinstance(snapshot, dict) or snapshot.get('format') != FORMAT or snapshot.get('source_sha256') != hashlib.sha256(raw).hexdigest():
             raise ValueError()
         for field in ('created', 'source_name', 'app_version', 'calculation_version', 'note'):
@@ -163,13 +177,16 @@ def decode_snapshot(data):
             raise ValueError()
         if not isinstance(snapshot['records'], dict) or not snapshot['records']:
             raise ValueError()
+        scope = snapshot.get('contacts')
+        if scope is not None and (not isinstance(scope, list) or not scope or not all(isinstance(c, str) and c for c in scope)):
+            raise ValueError()
         for key, row in snapshot['records'].items():
             if not key or not isinstance(row['original'], dict) or not row['contact']:
                 raise ValueError()
             if row['month'] is not None and not valid_month(row['month']):
                 raise ValueError()
             calc = row['calculation']
-            if row['month'] in snapshot['months'] and calc is None:
+            if row['month'] in snapshot['months'] and (scope is None or row['contact'] in scope) and calc is None:
                 raise ValueError()
             if calc is not None:
                 if type(calc['commission']) is not int or calc['commission'] < 0:
@@ -402,7 +419,7 @@ class DriveArchive:
                                  params={'alt': 'media', 'supportsAllDrives': 'true'})
         return decode_snapshot(response.content)
 
-    def save(self, snapshot, raw):
+    def save(self, snapshot, raw, reports=None):
         self.check_folder()
         for existing in self.list_snapshots():
             if existing.get('appProperties', {}).get('snapshot_id') == snapshot['id']:
@@ -410,11 +427,14 @@ class DriveArchive:
                 if saved != snapshot or saved_raw != raw:
                     raise ArchiveError('Az állapotazonosító már eltérő tartalommal létezik. Frissítsd az archívumlistát.')
                 return existing
-        data = encode_snapshot(snapshot, raw)
+        data = encode_snapshot(snapshot, raw, reports)
         archive_id = snapshot['id']
         boundary = 'babolna_' + uuid.uuid4().hex
         timestamp = snapshot['created'][:19].replace(':', '').replace('-', '').replace('T', '_')
         name = f'Jutalek_archivum_{timestamp}_{archive_id[:8]}.zip'
+        if snapshot.get('export_contact'):
+            person = re.sub(r'[^\w-]', '_', snapshot['export_contact'])[:70]
+            name = f"Jutalek_{snapshot['export_month']}_{person}_{timestamp}_{archive_id[:8]}.zip"
         metadata = {'name': name, 'parents': [self.folder_id], 'mimeType': 'application/zip',
                     'appProperties': {'babolna_archive': 'v1', 'snapshot_id': archive_id,
                                       'created': snapshot['created']}}
@@ -442,7 +462,7 @@ class DriveArchive:
                     if recovery_error.transient:
                         continue
                     raise DriveRequestError('A feltöltés eredménye bizonytalan, és az archívumlista ellenőrzése is sikertelen. '
-                                            'Frissítsd az archívumlistát; ne indíts újabb mentést ellenőrzés nélkül.',
+                                            'Próbáld újra ugyanazt a letöltést; az állapotazonosító megmarad.',
                                             status=recovery_error.status) from recovery_error
                 if matches:
                     result = matches[0]
@@ -450,15 +470,96 @@ class DriveArchive:
             if result is None:
                 raise DriveRequestError('A Drive átmeneti hibája miatt a feltöltés eredménye nem igazolható. '
                                         'Az ellenőrzés még nem találta meg ezt az állapotot. '
-                                        'Nem indítottunk ismételt feltöltést. Frissítsd az archívumlistát, majd próbáld később.',
+                                        'Nem indítottunk ismételt feltöltést. Próbáld újra ugyanazt a letöltést később.',
                                         status=exc.status, transient=True) from exc
         # Read-back is deliberately required before a successful archive message.
         try:
             saved, saved_raw = self.load(result['id'])
         except DriveRequestError as exc:
             raise DriveRequestError('Az archívum fájlja létrejött a Drive-on, de a tartalom visszaellenőrzése még nem sikerült. '
-                                    'Frissítsd az archívumlistát; újabb feltöltés nem szükséges. '
+                                    'Próbáld újra ugyanazt a letöltést; újabb feltöltés nem szükséges. '
                                     + str(exc), status=exc.status, transient=exc.transient) from exc
         if saved != snapshot or saved_raw != raw:
             raise ArchiveError('A Drive-mentés visszaellenőrzése sikertelen. Ne ments újra automatikusan; frissítsd a listát.')
         return result
+
+    def list_setting_events(self):
+        """Append-only choices, independent of completed financial reports."""
+        files, token = [], None
+        while True:
+            params = {'q': f"'{self.folder_id}' in parents and trashed = false and "
+                           "appProperties has { key='babolna_settings' and value='v1' }",
+                      'fields': 'nextPageToken,files(id,name,createdTime,appProperties,size)',
+                      'pageSize': 100, 'supportsAllDrives': 'true', 'includeItemsFromAllDrives': 'true',
+                      'orderBy': 'createdTime asc'}
+            if token:
+                params['pageToken'] = token
+            data = self._request('GET', 'drive/v3/files', params=params).json()
+            files.extend(data.get('files', []))
+            token = data.get('nextPageToken')
+            if not token:
+                return files
+
+    def load_setting_event(self, file):
+        meta = self._request('GET', 'drive/v3/files/' + file['id'], params={
+            'fields': 'parents,size,appProperties', 'supportsAllDrives': 'true'}).json()
+        if (self.folder_id not in meta.get('parents', []) or
+            meta.get('appProperties', {}).get('babolna_settings') != 'v1' or int(meta.get('size', 100001)) > 100000):
+            raise ArchiveError('Hibás hónapdöntés-mentés.')
+        event = self._request('GET', 'drive/v3/files/' + file['id'],
+                              params={'alt': 'media', 'supportsAllDrives': 'true'}).json()
+        validate_setting_event(event)
+        return event
+
+    def save_setting_event(self, event):
+        validate_setting_event(event)
+        self.check_folder()
+        matches = [f for f in self.list_setting_events()
+                   if f.get('appProperties', {}).get('event_id') == event['id']]
+        if matches:
+            result = matches[0]
+        else:
+            boundary = 'babolna_' + uuid.uuid4().hex
+            metadata = {'name': 'Jutalek_honapdontes_' + event['id'] + '.json',
+                        'parents': [self.folder_id], 'mimeType': 'application/json',
+                        'appProperties': {'babolna_settings': 'v1', 'event_id': event['id']}}
+            body = (f'--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'.encode() +
+                    json.dumps(metadata).encode() +
+                    f'\r\n--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'.encode() +
+                    json.dumps(event, ensure_ascii=False).encode() + f'\r\n--{boundary}--\r\n'.encode())
+            try:
+                result = self._request('POST', 'upload/drive/v3/files',
+                    params={'uploadType': 'multipart', 'supportsAllDrives': 'true', 'fields': 'id,name'},
+                    headers={'Content-Type': f'multipart/related; boundary={boundary}'}, data=body).json()
+            except DriveRequestError as exc:
+                if not exc.transient:
+                    raise
+                result = None
+                for delay in (0, 1, 2):
+                    if delay:
+                        time.sleep(delay)
+                    matches = [f for f in self.list_setting_events()
+                               if f.get('appProperties', {}).get('event_id') == event['id']]
+                    if matches:
+                        result = matches[0]; break
+                if result is None:
+                    raise ArchiveError('A hónapdöntés Drive-mentése még nem igazolható. Próbáld újra; a mentésazonosítót megőrizzük.') from exc
+        if self.load_setting_event(result) != event:
+            raise ArchiveError('A hónapdöntés mentésének visszaellenőrzése sikertelen.')
+        return result
+
+
+def validate_setting_event(event):
+    if (not isinstance(event, dict) or event.get('format') != 'babolna-month-choice-v1' or
+        event.get('action') not in ('decision', 'override', 'clear_override') or
+        not isinstance(event.get('freight'), str) or not event['freight'].strip() or
+        not isinstance(event.get('note'), str) or len(event['note']) > 10000 or
+        not re.fullmatch('[a-f0-9]{32}', str(event.get('id', ''))) or
+        not isinstance(event.get('signature'), str)):
+        raise ArchiveError('Hibás hónapdöntés-mentés.')
+    if event['action'] != 'clear_override' and not valid_month(event.get('month', '')):
+        raise ArchiveError('Hibás mentett hónap.')
+    try:
+        datetime.fromisoformat(event['created'])
+    except (KeyError, ValueError, TypeError):
+        raise ArchiveError('Hibás hónapdöntés-dátum.')

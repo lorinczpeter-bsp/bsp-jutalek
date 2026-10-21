@@ -5,8 +5,8 @@ from decimal import Decimal
 import pandas as pd
 from core import origin,build_plan,dec,today
 from exports import ft
-from settlement import (overrides,reassign,clear_reassignment,payments,read_payment_report,
-                        import_payments,remove_payment,analytics,resolved_months)
+from persistence import persist_choice
+from settlement import overrides,analytics,resolved_months
 
 def money_display(frame):
     result=frame.copy()
@@ -45,56 +45,24 @@ def show_reassign(st,store,bundle):
     st.caption('Eredeti dátumok: '+', '.join(record.dates).replace('-','.'))
     current=origin(record,store)
     st.write('Jelenlegi elszámolási hónap: '+(current or 'Még nincs eldöntve'))
-    paid=payments(store).get(key)
-    if paid:st.warning(f"Már kifizetettként szerepel: {paid['paid_date']} · {ft(paid['amount'])} Ft. Az átsorolás nem törli a kifizetési előzményt; nem fizetjük ki újra.")
     months=available_months(records,store)
     with st.form('reassign_'+key):
         month=st.selectbox('Új elszámolási hónap',months,index=months.index(current) if current in months else months.index(record.months[-1]))
         note=st.text_input('Átsorolás megjegyzése (nem kötelező)')
         save=st.form_submit_button('Átsorolás mentése')
         if save:
-            try:reassign(store,record,month,note)
+            try:persist_choice(st,store,record,'override',month,note)
             except Exception as e:st.error('Sikertelen átsorolás: '+str(e))
             else:
                 st.session_state.decision_feedback=f'Sikeres átsorolás: {key} → {month}. Az új hónap árfolyamával számolunk.'
                 st.rerun()
     if key in overrides(store) and st.button('Kézi átsorolás visszavonása',key='clear_'+key):
-        clear_reassignment(store,key)
+        try:
+            persist_choice(st,store,record,'clear_override')
+        except Exception as exc:
+            st.error('A visszavonás mentése sikertelen: '+str(exc));return
         st.session_state.decision_feedback=f'{key}: kézi átsorolás visszavonva; az eredeti dátum / korábbi dátumdöntés érvényes.'
         st.rerun()
-
-def show_payments(st,store,bundle):
-    st.subheader('Korábbi kimutatás feltöltése (opcionális)')
-    st.caption('A feltöltés önmagában nem bizonyít kifizetést. Csak ténylegesen kifizetett kimutatást rögzíts. Kézi és alkalmazással készített XLSX is használható.')
-    candidates=sorted({r.contact for r in bundle[2]}) if bundle else []
-    contact=st.selectbox('Fuvarszervező a korábbi kimutatáshoz',candidates) if candidates else st.text_input('Fuvarszervező teljes neve')
-    report=st.file_uploader('Korábban kifizetett kimutatás',type=['xlsx'],key='paid_report')
-    if report:
-        try:
-            rows,errors=read_payment_report(report.getvalue(),contact or '')
-            reg=payments(store)
-            st.dataframe(pd.DataFrame([{'Fuvarszám':r['freight'],'Fuvarszervező':r['contact'],'Korábbi kifizetés (Ft)':float(dec(r['amount'])),
-                'Állapot':'Már nyilvántartva' if r['freight'] in reg else 'Új kifizetési előzmény'} for r in rows]),hide_index=True)
-            if errors:st.error('Az import hibás sorokat tartalmaz; nem rögzíthető.');st.dataframe(pd.DataFrame(errors),hide_index=True)
-            paid_date=st.date_input('Kifizetés dátuma',value=today(),key='payment_date')
-            confirmed=st.checkbox('Megerősítem, hogy a kimutatás pozitív jutalékai ténylegesen ki lettek fizetve.',key='payment_confirm')
-            if st.button('Kifizetési előzmények rögzítése',disabled=not confirmed or bool(errors) or not rows,type='primary'):
-                new,duplicates=import_payments(store,rows,report.name,hashlib.sha256(report.getvalue()).hexdigest(),paid_date)
-                st.session_state.decision_feedback=f'Kifizetési előzmények rögzítve: {new} új fuvar, {len(duplicates)} már korábban nyilvántartott fuvar. Nincs dupla import.'
-                st.rerun()
-        except ValueError as e:st.error(str(e))
-    registry=payments(store)
-    if not registry:return
-    st.subheader('A feltöltött korábbi kimutatás alapján ellenőrzött tételek')
-    st.dataframe(pd.DataFrame([{'Fuvarszám':k,'Fuvarszervező':r['contact'],'Kifizetés dátuma':r['paid_date'],
-        'Tényleges korábbi összeg (Ft)':float(dec(r['amount'])),'Forrás':r['source']} for k,r in registry.items()]),hide_index=True)
-    with st.expander('Tévesen rögzített kifizetés visszavonása'):
-        key=st.text_input('Visszavonandó kifizetés fuvarszáma',key='remove_payment_key').strip()
-        confirm=st.checkbox('Ellenőriztem: ez a tétel nem lett kifizetve. A visszavonás után újra fizethető.',key='remove_payment_confirm')
-        if st.button('Kifizetési jelölés visszavonása',disabled=not confirm or key not in registry):
-            remove_payment(store,key)
-            st.session_state.decision_feedback=f'{key}: kifizetési jelölés visszavonva. A művelet naplózva.'
-            st.rerun()
 
 def show_analytics(st,store,bundle):
     st.subheader('Jutalékelemzés')
@@ -130,8 +98,8 @@ def show_analytics(st,store,bundle):
     st.subheader('Havi jutalék fuvarszervezőnként')
     chart_data=frame[['Hónap','Fuvarszervező','Számított jutalék (Ft)']].copy()
     chart_data['Jutalék']=chart_data['Számított jutalék (Ft)'].map(lambda x:ft(x)+' Ft')
-    st.vega_lite_chart(chart_data,spec=commission_chart_spec('bar'),use_container_width=True)
-    st.vega_lite_chart(chart_data,spec=commission_chart_spec('line'),use_container_width=True)
+    st.vega_lite_chart(chart_data,spec=commission_chart_spec('bar'),width='stretch')
+    st.vega_lite_chart(chart_data,spec=commission_chart_spec('line'),width='stretch')
     st.subheader('Havi értékek')
     st.dataframe(money_display(monthly.reset_index()),hide_index=True)
     people=frame.groupby('Fuvarszervező')['Számított jutalék (Ft)'].sum().reset_index(name='Összesen (Ft)')

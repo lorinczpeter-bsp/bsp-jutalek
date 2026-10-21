@@ -7,9 +7,10 @@ from core import (Store, load_workbook, build_plan, origin, export_columns, expo
                   today, dec, valid_month, json_dump, CONTACT, MARGIN, DATE)
 from exports import make_excel, make_pdf, ft, display_rows
 from settlement import filename_stem,overrides
-from ui_features import show_reassign,show_payments,show_analytics
-from web_session import session_store,settings_backup,restore_panel
-from archive_ui import show_archive
+from ui_features import show_reassign,show_analytics
+from web_session import session_store,settings_backup
+from archive_ui import archive_client
+from persistence import ExportJob, persist_choice
 from auto_check import show_auto_check
 
 ROOT=Path(__file__).parent
@@ -86,32 +87,50 @@ with st.sidebar:
     st.markdown("**10% jutalék · HUF elszámolás**")
     st.caption("Árrés extra számlasorokkal • Teljesítés időpontja")
     st.divider()
-    st.caption("A feltöltött adatok ebben a munkamenetben maradnak. Az átsorolásokat és árfolyamokat JSON-mentéssel viheted tovább.")
-    st.download_button("Beállítások mentése (JSON)",settings_backup(store),
-        file_name=f"jutalek_beallitasok_{today()}.json",mime="application/json")
-    st.caption("v2.3.0 · Streamlit web")
+    st.caption("A hónapdöntések automatikusan mentődnek. Excel vagy PDF letöltésekor a kész állapot a Drive-ra kerül.")
+    st.caption("v2.4.0 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
 feedback=st.session_state.pop("decision_feedback",None)
 if feedback:st.success(feedback)
-work_tab,reassign_tab,payment_tab,analytics_tab,archive_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Korábbi kimutatás (opcionális)","Jutalékelemzés","Drive-archívum","Használat és beállítások"])
+work_tab,reassign_tab,analytics_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Jutalékelemzés","Használat és beállítások"])
+
+@st.fragment(run_every="2s")
+def download_status(job):
+    if job.error:
+        st.error('A letöltéshez szükséges mentés nem sikerült: ' + job.error)
+    elif job.status:
+        if job.finished: st.success(job.status)
+        else: st.info(job.status)
+
 
 def downloads(plan,prefix):
-    # Csak a gomb megnyomásakor készülnek a nagyobb kimenetek.
-    digest=hashlib.sha256(json_dump({k:v for k,v in plan.items() if k!="created"}).encode()).hexdigest()
-    key=prefix+"_"+today().isoformat()+"_"+digest
-    if key not in st.session_state:
-        with st.spinner("Kimutatások készítése..."):
-            st.session_state[key]=(make_excel(plan),make_pdf(plan))
-    if key in st.session_state:
-        x,p=st.session_state[key]
-        slug="".join(c if c.isalnum() or c in "-_" else "_" for c in plan["contact"])
-        stem=filename_stem(plan)
-        a,b=st.columns(2)
-        a.download_button("Excel letöltése",x,stem+".xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",key=key+"_x")
-        b.download_button("PDF letöltése",p,stem+".pdf",mime="application/pdf",key=key+"_p")
+    if not st.session_state.get('history_ready'):
+        st.error('A mentett hónapdöntések beolvasása nem sikerült. Frissítsd az automatikus ellenőrzést a letöltés előtt.'); return
+    if plan['blockers']:
+        st.info('A letöltés a jelzett hibák rendezése után érhető el.'); return
+    try:
+        client = archive_client(st)
+        if client is None:
+            st.error('Letöltéshez állítsd be a Drive-mentést.'); return
+    except ValueError as exc:
+        st.error(str(exc)); return
+    frozen = settings_backup(store)
+    digest = hashlib.sha256(json_dump({k:v for k,v in plan.items() if k not in ('created','revision')}).encode() + frozen).hexdigest()
+    key = prefix + '_' + today().isoformat() + '_' + digest
+    jobs = st.session_state.setdefault('export_jobs', {})
+    if key not in jobs:
+        jobs[key] = ExportJob(client, st.session_state.source_raw, st.session_state.source_name, frozen, plan)
+    job = jobs[key]
+    stem = filename_stem(plan)
+    a,b = st.columns(2)
+    a.download_button('Excel letöltése',lambda: job.download('xlsx'),stem+'.xlsx',
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key=key+'_x',on_click='ignore')
+    b.download_button('PDF letöltése',lambda: job.download('pdf'),stem+'.pdf',mime='application/pdf',key=key+'_p',on_click='ignore')
+    st.caption('Letöltéskor a kész Excel, PDF, forrás és hónapbesorolások automatikusan a Drive-ra mentődnek.')
+    download_status(job)
+
 
 def preview(plan):
     from html import escape
@@ -122,7 +141,7 @@ def preview(plan):
         return f'<{tag} style="text-align:{align}">'+escape(str(value)).replace('\n','<br>')+f'</{tag}>'
     table='<div class="commission-preview"><table><thead><tr>'+''.join(cell(h,'th',i) for i,h in enumerate(cols))+'</tr></thead><tbody>'
     for row,line in zip(display_rows(plan),plan['lines']):
-        row[-1]=ft(row[-1])+" Ft"+(' · már kifizetve' if line.get('paid') else '')
+        row[-1]=ft(row[-1])+" Ft"
         table+='<tr'+(' class="negative"' if line['negative'] else '')+'>'+''.join(cell(v,'td',i) for i,v in enumerate(row))+'</tr>'
     table+='</tbody></table></div>'
     st.markdown('''<style>
@@ -139,30 +158,23 @@ def preview(plan):
 with help_tab:
     st.subheader("Első használat")
     st.markdown("""
-1. Töltsd fel a teljes fuvarlistát.
-2. Válassz hónapot és kapcsolattartót.
-3. A több hónapot érintő tételekhez rendelj elszámolási hónapot.
-4. Ellenőrizd a figyelmeztetéseket, majd töltsd le az Excelt vagy PDF-et.
+1. Töltsd fel a teljes, több hónapot és minden fuvarszervezőt tartalmazó fuvarlistát.
+2. A rendszer visszatölti a mentett hónapdöntéseket, és ellenőrzi az előző három naptári hónapot.
+3. Válassz hónapot és fuvarszervezőt. Rendezd a még eldöntetlen hónapbesorolásokat.
+4. Töltsd le az Excelt vagy PDF-et. A letöltés előtt a kész állapot automatikusan a Drive-ra mentődik.
 
-**Nincs havi lezárás.** A kimutatás a kiválasztott hónap teljes aktuális állapotát mutatja.
-Új feltöltés után újraszámolható, egy korábbi letöltés önmagában nem csökkenti az összeget. A kifizetettként importált fuvarok újra fizetendő jutaléka 0 Ft.
-Utólag bekerült vagy módosult tétel az eredeti hónap friss kimutatásában jelenik meg.
-A korábbi kimutatást a Korábbi kimutatás (opcionális) fülön rögzítheted, a tényleges kifizetés külön megerősítésével. Az eltérő összegű korábbi kifizetéseket jelezzük, automatikusan nem fizetünk rá.
+A hónapdöntés és átsorolás a rögzítésekor automatikusan mentődik, a visszavonással együtt.
+A letöltés a kiválasztott fuvarszervező adott havi kész állapotát menti el összehasonlítási alapként.
+A kész Excel és PDF, a teljes eredeti forrás és a beállítások együtt kerülnek megőrzésre.
+Drive-hiba esetén a letöltés nem indul el mentés nélkül. Azonos változat Excel- és PDF-letöltése közös mentést használ.
+Nincs havi lezárás, kézi állapotmentés vagy kifizetési nyilvántartás. Mindig a teljes számított jutalék látható.
+A még le nem töltött adat nem válik új összehasonlítási alappá.
 
-**Összesítő:** a PDF első oldalán, az Excel első munkalapján. Utána a részletező következik.
-**Kerekítés:** tételenként egész forint, a feleket nullától távolodva.
-**Vegyes pénznem:** forintosított fuvardíj mínusz forintosított alvállalkozói díj. Eltérő pénznemnél a kész árrést nem használjuk; a külön extra számlasorokat nem adjuk hozzá. A számított árrés HUF-ban jelenik meg.
-
-**Árfolyam:** az elszámolási hónap MNB napi EUR/HUF jegyzéseinek számtani átlaga.
-A még folyamatban lévő hónap teljes havi átlaga nem ismert. Hiányzó árfolyamnál az EUR-tételek
-kimaradnak és a kimutatás hiányosként jelenik meg. A negatív árrés piros kiemelést és 0 Ft jutalékot kap.
+**Számítás:** a pozitív árrés 10%-a, tételenként egész forintra kerekítve. Negatív árrés: piros sor, 0 Ft jutalék.
+Azonos pénznemnél az exportált extra árrés, vegyes HUF/EUR pénznemnél a forintosított díjak különbsége az alap.
+Az elszámolási hónap pontos MNB havi átlagával számolunk; megjelenítéskor két tizedes látszik.
+A folyamatban lévő hónap teljes havi árfolyama még nem ismert. Hiányos kimutatás nem tölthető le kész állapotként.
 """)
-    st.subheader("Webes munkamenet")
-    st.write("A fuvarlista és a beállítások felhasználónként külön munkamenetben vannak. Új munkamenet vagy szerver-újraindítás után töltsd fel újra a fuvarlistát, és szükség esetén a mentett JSON-beállításokat.")
-    st.write("Korábbi kifizetést csak a korábbi kimutatás opcionális feltöltése és megerősítése után ellenőrzünk. Az elemzés mindig a teljes számított jutalékot mutatja, kifizetési oszlopok nélkül.")
-    st.subheader("Drive-archívum")
-    st.write("A beállított céges Drive-mappában a teljes forrás-Excel, a hónapdöntések, átsorolások, pontos árfolyamok és az ellenőrzött hónapok számított jutalékai külön állapotként menthetők. Új feltöltéskor a fő fül automatikusan ellenőrzi az előző három naptári hónapot, és átveszi a hiányzó archivált hónapdöntéseket. A Drive-archívum fülön más időszakot is összehasonlíthatsz, és új ellenőrzött alapot menthetsz. A mentés nem lezárás és nem kifizetés; a hiányzó fuvar nem feltétlenül törölt fuvar. A csatlakoztatás leírása: DRIVE_ARCHIVUM_BEALLITAS.md.")
-    restore_panel(st,store)
     st.subheader("Árfolyam kézi rögzítése")
     st.caption("Csak automatikus lekérdezési hiba esetére. A forrást és az indoklást is rögzíteni kell; a mentett árfolyam nem írható felül.")
     with st.form("manual_rate"):
@@ -240,13 +252,13 @@ with work_tab:
                     note=st.text_input("Megjegyzés (nem kötelező)")
                     if st.form_submit_button("Hónap hozzárendelése"):
                         try:
-                            store.save_decision(chosen,assigned,note)
+                            persist_choice(st,store,chosen,'decision',assigned,note)
                         except (ValueError,sqlite3.Error,OSError) as e:
                             st.error("Sikertelen hónap-hozzárendelés: "+str(e))
                         else:
                             st.session_state.decision_feedback=f"Sikeres hozzárendelés: {chosen.key} → {assigned}. A fuvar kikerült az ellenőrizendők közül."
                             st.rerun()
-            else:st.success("Minden érintett fuvar hónap-hozzárendelése rendezett." if cross else "Nincs több hónapot érintő kiegyenlítés a kiválasztott hónapban.")
+
             resolved=[r for r in cross if origin(r,store) is not None]
             if resolved:
                 with st.expander(f"Rendezett hónap-hozzárendelések ({len(resolved)})"):
@@ -264,14 +276,10 @@ with work_tab:
             '<div class="report-card"><p>Elszámolt fuvarok</p><strong>'+ft(len(plan["lines"]))+' db</strong><small>A kiválasztott hónap és kapcsolattartó tételei</small></div>'
             '<div class="report-card highlight"><p>Árrés extrákkal</p><strong>'+ft(margin)+' Ft</strong><small>Pozitív és negatív árrések összege; jutalék csak a pozitív tételekre.</small></div></div>'
             '<div class="report-total"><span>Jutalék összesen</span><strong>'+ft(plan["total"])+' Ft</strong></div>',unsafe_allow_html=True)
-        if plan.get("paid_keys"):
-            st.caption(f'Számított teljes jutalék: {ft(plan["earned_total"])} Ft | Kifizetettként kezelt: {ft(plan["paid_total"])} Ft | Importált tényleges kifizetés: {ft(plan["actual_paid_total"],2)} Ft')
         for m,r in sorted(plan["rates"].items()):
             st.markdown('<div class="rate-strip"><b>MNB EUR/HUF</b> &nbsp; '+escape(m)+' havi átlag <b style="float:right">'+ft(r["rate"],2)+' Ft/EUR</b></div>',unsafe_allow_html=True)
         for msg in plan["blockers"]:st.error(msg)
         for msg in plan["warnings"]:st.warning(msg)
-        if any(x["negative"] for x in plan["lines"]):
-            st.warning("A kiválasztott elszámolás negatív árrésű tételt is tartalmaz, 0 Ft jutalékkal.")
         preview(plan)
         downloads(plan,"draft")
     else:
@@ -282,6 +290,4 @@ with work_tab:
 
 bundle=st.session_state.get("source_bundle")
 with reassign_tab:show_reassign(st,store,bundle)
-with payment_tab:show_payments(st,store,bundle)
 with analytics_tab:show_analytics(st,store,bundle)
-with archive_tab:show_archive(st,store,bundle,st.session_state.get("source_raw"),st.session_state.get("source_name","fuvarlista.xlsx"))

@@ -128,6 +128,6 @@ def analytics(records,headers,store,months,contacts,rate_provider=None):
             p=build_plan(records,headers,store,month,contact,'analytics',snapshot=True,rate_provider=rate_provider)
             issues.extend(f'{month} / {contact}: {msg}' for msg in p['blockers'])
             rows.append({'Hónap':month,'Fuvarszervező':contact,'Számított jutalék (Ft)':p['earned_total'],
-                'Kifizetettként kezelt (Ft)':p['paid_total'],'Még fizetendő (Ft)':p['total'],'Fuvarok':len(p['lines']),
+                'Fuvarok':len(p['lines']),
                 'Hiányos':bool(p['blockers'])})
     return rows,list(dict.fromkeys(issues))

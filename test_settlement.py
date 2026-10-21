@@ -55,35 +55,13 @@ class SettlementTests(unittest.TestCase):
         clear_reassignment(self.s,r.key)
         self.assertEqual(origin(r,self.s),'2026-09')
         with self.assertRaises(ValueError):reassign(self.s,r,'2026-13')
-    def test_report_import_old_excel_and_duplicate_protection(self):
-        w=openpyxl.Workbook();ws=w.active;ws.append(['Fuvarszám','Jutalék']);ws.append(['16691-1',6832.1]);ws.append(['16692-1',0])
-        out=io.BytesIO();w.save(out)
-        rows,errors=read_payment_report(out.getvalue(),'Peti');self.assertFalse(errors);self.assertEqual(len(rows),1)
-        self.assertEqual(import_payments(self.s,rows,'kézi.xlsx','hash','2026-10-10'),(1,[]))
-        self.assertEqual(import_payments(self.s,rows,'másik.xlsx','hash2','2026-10-11'),(0,['16691-1']))
-        p=self.plan([mixed()]);self.assertEqual(p['total'],0);self.assertEqual(p['earned_total'],6832)
-        self.assertEqual(p['paid_keys'],['16691-1']);self.assertEqual(p['actual_paid_total'],'6832.1')
-        reassign(self.s,mixed(),'2026-08')
-        self.assertEqual(self.plan([mixed()],'2026-08')['total'],0)
-        remove_payment(self.s,'16691-1')
-        self.assertGreater(self.plan([mixed()],'2026-08')['total'],0)
-    def test_report_new_format_infers_owner_and_skips_paid_zero(self):
-        p=self.plan([mixed()]);rows,errors=read_payment_report(make_excel(p))
-        self.assertFalse(errors);self.assertEqual(rows[0]['contact'],'Peti')
-        import_payments(self.s,rows,'új.xlsx','x','2026-10-10')
-        p=self.plan([mixed()]);w=openpyxl.load_workbook(io.BytesIO(make_excel(p)))
-        self.assertIn('Kifizetési ellenőrzés',w.sheetnames)
-        self.assertIn('kifizetve',w['Jutalékelszámolás']['I9'].number_format)
-        with self.assertRaises(ValueError):read_payment_report(make_excel(p))
-    def test_report_duplicates_missing_cached_formula_negative(self):
-        for values in [[['16691-1',10],['16691-1',10]],[['16691-1','=1+1']],[['16691-1',-10]]]:
-            w=openpyxl.Workbook();w.active.append(['Fuvarszám','Jutalék'])
-            for row in values:w.active.append(row)
-            out=io.BytesIO();w.save(out)
-            rows,errors=read_payment_report(out.getvalue(),'Peti');self.assertTrue(errors)
-    def test_payment_owner_change_does_not_pay_twice(self):
-        import_payments(self.s,[{'freight':'16691-1','contact':'Másik név','amount':'1000'}],'a.xlsx','x','2026-10-10')
-        p=self.plan([mixed()]);self.assertEqual(p['total'],0);self.assertTrue(any('eltér' in x for x in p['warnings']))
+    def test_legacy_payment_state_does_not_reduce_commission(self):
+        import_payments(self.s,[{'freight':'16691-1','contact':'Peti','amount':'1000'}],'old.xlsx','x','2026-10-10')
+        p=self.plan([mixed()])
+        self.assertEqual(p['total'],6832)
+        self.assertEqual(p['paid_keys'],[])
+        w=openpyxl.load_workbook(io.BytesIO(make_excel(p)))
+        self.assertNotIn('Kifizetési ellenőrzés',w.sheetnames)
     def test_analytics_zero_months_multiple_contacts_and_paid(self):
         records=[rec('1-1',margin='100',currency='HUF',dates='2026-07-01'),
                  rec('2-1',margin='200',currency='HUF',dates='2026-09-01',owner='Anna')]
@@ -91,8 +69,7 @@ class SettlementTests(unittest.TestCase):
         rows,issues=analytics(records,HEADERS,self.s,['2026-07','2026-08','2026-09'],['Peti','Anna'],fx)
         self.assertFalse(issues);self.assertEqual(len(rows),6)
         self.assertEqual(sum(r['Számított jutalék (Ft)'] for r in rows),30)
-        self.assertEqual(sum(r['Még fizetendő (Ft)'] for r in rows),20)
-        self.assertEqual(sum(r['Kifizetettként kezelt (Ft)'] for r in rows),10)
+        self.assertTrue(all('Még fizetendő (Ft)' not in r for r in rows))
     def test_filename_uses_creation_date_not_status(self):
         with patch('core.today',return_value=__import__('datetime').date(2026,10,17)):
             name=filename_stem({'contact':'Anikó','month':'2026-09','created':'2020-01-01','status':'AKTUÁLIS ÁLLAPOT'})

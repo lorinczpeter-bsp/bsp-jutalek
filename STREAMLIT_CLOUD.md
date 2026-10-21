@@ -1,7 +1,7 @@
 # Streamlit Community Cloud – telepítés
 
 1. A csomag Babolna_Sped_Jutalek mappájának tartalmát tedd egy GitHub-repozitórium gyökerébe.
-   Az app.py, requirements.txt, core.py, settlement.py, ui_features.py, web_session.py, exports.py, drive_archive.py, archive_ui.py,
+   Az app.py, requirements.txt, core.py, settlement.py, ui_features.py, web_session.py, exports.py, drive_archive.py, archive_ui.py, auto_check.py, persistence.py,
    assets mappa és .streamlit/config.toml maradjon együtt. A .streamlit mappa rejtett lehet a fájlkezelőben.
 2. Nyisd meg a https://share.streamlit.io/ oldalt és hozz létre új alkalmazást.
 3. Válaszd ki a repozitóriumot, az ágat és belépési fájlként az app.py-t.
@@ -9,23 +9,19 @@
    `app_password = "a-sajat-jelszavad"`. Ehhez mintát ad a .streamlit/secrets.toml.example.
 5. Indítsd el a telepítést (Deploy). A függőségeket a requirements.txt alapján telepíti a rendszer.
 
+## Frissítés v2.4.0-ra
+A csomag összes alkalmazásfájlját frissítsd, különösen az új persistence.py fájlt és a requirements.txt fájlt.
+A kattintásra előállított, mentéssel összekötött letöltéshez Streamlit 1.59 vagy újabb szükséges.
+A meglévő Streamlit Secrets és Drive-mappa változatlanul használható.
+
 ## Webes használat
-
-- Nincs havi lezárás és nincs lezárási archívum.
-- A fuvarlisták, átsorolások és az opcionális korábbi kimutatás munkamenetenként elkülönülnek.
-- A normál kimutatás és az elemzés kifizetési állapot nélkül használható.
-- Csak a Korábbi kimutatás (opcionális) fülre feltöltött, kifizetettként megerősített
-  régi Excel aktiválja a dupla kifizetés ellenőrzését az adott munkamenetben.
-- Új munkamenetben és szerver-újraindítás után töltsd fel újra a fuvarlistát.
-- Az átsorolások és árfolyamok a bal oldali Beállítások mentése (JSON) gombbal továbbvihetők.
-  Visszatöltés: Használat és beállítások → Mentett beállítások visszatöltése.
-- A JSON-mentés nem tartalmaz fuvarlistát, kifizetési állapotot vagy jelszót.
-- Régi kifizetés ellenőrzéséhez új munkamenetben töltsd fel újra a korábbi kimutatást.
-- Opcionális közös Drive-archívum: a DRIVE_ARCHIVUM_BEALLITAS.md alapján csatlakoztatható.
-  Ellenőrzött állapotot, eredeti forrást és beállításokat őriz, lezárás vagy kifizetési jelölés nélkül.
-
-A csomag nem tartalmaz éles céges adatot és jelszót. A telepítéshez szükséges fájlok készen állnak;
-a repozitórium létrehozása és a Streamlit Cloudhoz kapcsolása még szükséges.
+- Excel vagy PDF letöltésekor automatikus, visszaellenőrzött kész mentés kerül a Drive-ra.
+- A hónapdöntések és átsorolások külön, azonnal mentődnek, visszavonásaikkal együtt.
+- Az előző három naptári hónap visszaellenőrzése automatikus.
+- Nincs Drive-archívum vagy Korábbi kimutatás főfül, kézi állapotmentés és kifizetési nyilvántartás.
+- Új belépés után töltsd fel a forrást; a mentett hónapdöntések automatikusan visszatöltődnek.
+- Drive-kapcsolat nélkül az előnézet elérhető, de kész kimutatás nem tölthető le mentés nélkül.
+- Részletes használat: HASZNALAT.md. Drive-beállítás: DRIVE_ARCHIVUM_BEALLITAS.md.
 
 Hivatalos dokumentáció:
 https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/file-organization

@@ -1,9 +1,11 @@
 import io,tempfile,unittest
+from unittest.mock import patch
+from persistence import apply_event
 from pathlib import Path
 import openpyxl
 from core import Store,origin,load_workbook
 from settlement import payments
-from ui_features import show_analytics,show_payments,show_reassign
+from ui_features import show_analytics,show_reassign
 from test_ui import App,Rerun
 from test_core import HEADERS,rec
 
@@ -38,17 +40,10 @@ class FeatureUITests(unittest.TestCase):
         self.assertEqual(len(self.ui.tables[0]),3)
     def test_reassign_form_saves_requested_month(self):
         self.ui.submit=True
-        with self.assertRaises(Rerun):show_reassign(self.ui,self.s,self.bundle)
+        def persist(st,store,record,action,month,note):
+            from settlement import reassign
+            reassign(store,record,month,note)
+        with patch('ui_features.persist_choice',side_effect=persist):
+            with self.assertRaises(Rerun):show_reassign(self.ui,self.s,self.bundle)
         self.assertEqual(origin(self.records[0],self.s),'2026-08')
-    def test_payment_upload_needs_confirmation_and_saves(self):
-        w=openpyxl.Workbook();w.active.append(['Fuvarszám','Jutalék']);w.active.append(['1-1',10])
-        out=io.BytesIO();w.save(out)
-        report=io.BytesIO(out.getvalue());report.name='paid.xlsx';self.ui.report=report
-        self.ui.clicked='Kifizetési előzmények rögzítése'
-        show_payments(self.ui,self.s,self.bundle)
-        self.assertFalse(payments(self.s))
-        self.ui.confirm=True
-        with self.assertRaises(Rerun):show_payments(self.ui,self.s,self.bundle)
-        self.assertEqual(len(payments(self.s)),1)
-
 if __name__=='__main__':unittest.main()

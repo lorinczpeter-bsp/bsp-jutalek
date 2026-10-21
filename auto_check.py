@@ -1,13 +1,14 @@
-"""Read-only automatic history checks; checked archives remain explicit saves."""
+"""Automatic checks against completed downloads and durable month choices."""
 import hashlib
 import json
 from datetime import timedelta
 
 import pandas as pd
 
-from core import today, valid_month, dec
+from core import today
 from drive_archive import ArchiveError, build_snapshot, compare_snapshots
 from web_session import settings_backup
+from persistence import restore_history
 
 
 def previous_months(day, count=3):
@@ -20,51 +21,43 @@ def previous_months(day, count=3):
 
 
 def inherit_settings(store, snapshots):
-    """Newest archived key wins; never replace choices made in this session."""
-    merged = {table: {} for table in ('decisions', 'overrides', 'rates')}
-    for snapshot in sorted(snapshots, key=lambda s: s['created'], reverse=True):
-        for table in merged:
-            for row in snapshot['settings'].get(table, []):
-                merged[table].setdefault(row['month'] if table == 'rates' else row['freight'], row)
-    count = 0
-    with store.connect() as connection:
-        for table, rows in merged.items():
-            for row in rows.values():
-                columns = list(row)
-                sql = ('INSERT OR IGNORE INTO ' + table + ' (' + ','.join(columns) +
-                       ') VALUES (' + ','.join('?' for _ in columns) + ')')
-                # Validated archive settings only; fixed column names from the snapshot schema.
-                allowed = {'decisions': {'freight','signature','month','note'},
-                           'overrides': {'freight','month','note','created'},
-                           'rates': {'month','payload'}}
-                if (set(columns) != allowed[table] or
-                    not all(isinstance(v, str) for v in row.values()) or
-                    not valid_month(row['month'])):
-                    raise ArchiveError('Hibás archivált beállítás.')
-                if table == 'rates':
-                    try:
-                        if dec(json.loads(row['payload'])['rate']) <= 0:
-                            raise ValueError()
-                    except (ValueError, KeyError, TypeError):
-                        raise ArchiveError('Hibás archivált árfolyam.')
-                count += connection.execute(sql, tuple(row[c] for c in columns)).rowcount
-        if count:
-            store.bump(connection)
-    return count
+    # Compatibility helper: use the latest full settings, never union old removals.
+    restore_history(store, snapshots, [])
 
 
 def check_history(raw, name, store, snapshots, months, rate_provider=None):
+    from core import load_workbook, origin
     results = []
+    records = load_workbook(raw)[1]
     ordered = sorted(snapshots, key=lambda s: s['created'], reverse=True)
     for month in months:
-        baseline = next((s for s in ordered if month in s['months']), None)
-        if baseline is None:
-            results.append({'month': month, 'missing': True})
-            continue
+        candidates = [s for s in ordered if month in s['months']]
+        if not candidates:
+            results.append({'month': month, 'missing': True}); continue
+        by_contact = {}
+        for snapshot in candidates:
+            scope = snapshot.get('contacts')
+            contacts = scope if scope is not None else {r['contact'] for r in snapshot['records'].values()}
+            for contact in contacts:
+                by_contact.setdefault(contact, snapshot)
+        old_rows, row_dates = {}, {}
+        for contact, snapshot in by_contact.items():
+            for key, row in snapshot['records'].items():
+                if row['contact'] == contact and snapshot['created'] > row_dates.get(key, ''):
+                    old_rows[key] = row
+                    row_dates[key] = snapshot['created']
+        active_keys = {k for k,r in old_rows.items() if r['month'] == month}
+        current_contacts = set(by_contact) | {r.contact for r in records if r.key in active_keys}
+        unknown = sorted({r.contact for r in records if origin(r,store) == month} - current_contacts)
+        baseline = dict(candidates[0], months=[month], records=old_rows)
         try:
-            current = build_snapshot(raw, name, store, [month], rate_provider=rate_provider)
+            current = build_snapshot(raw, name, store, [month], rate_provider=rate_provider,
+                                     contacts=sorted(current_contacts))
+            current['records'] = {k:r for k,r in current['records'].items()
+                                  if r['contact'] in by_contact or k in active_keys}
             result = compare_snapshots(baseline, current, [month])
-            results.append({'month': month, 'baseline': baseline, 'result': result})
+            results.append({'month': month, 'baseline': baseline, 'result': result,
+                            'unknown_contacts': unknown})
         except (ValueError, ArchiveError) as exc:
             results.append({'month': month, 'error': str(exc)})
     return results
@@ -73,10 +66,11 @@ def check_history(raw, name, store, snapshots, months, rate_provider=None):
 def show_auto_check(st, store, raw, name):
     from archive_ui import archive_client
     from ui_features import money_display
+    st.session_state['history_ready'] = False
     st.subheader('Előző 3 hónap automatikus visszaellenőrzése')
     months = previous_months(today())
     st.caption('Vizsgált naptári hónapok: ' + ', '.join(months) +
-               '. Hónaponként a legutóbbi ellenőrzött mentést használjuk, minden fuvarszervezőre.')
+               '. Hónaponként és fuvarszervezőnként a legutóbbi kész kimutatáshoz hasonlítunk.')
     try:
         client = archive_client(st)
         if client is None:
@@ -87,10 +81,22 @@ def show_auto_check(st, store, raw, name):
             with st.spinner('Korábbi mentések és hónapbesorolások beolvasása…'):
                 files = client.list_snapshots()
                 snapshots = [client.load(f['id'])[0] for f in files]
-                inherit_settings(store, snapshots)
+                events = [client.load_setting_event(f) for f in client.list_setting_events()]
+                # A verified write can briefly lag in Drive's list index. Keep
+                # its local copy until listed so a rerun cannot undo the choice.
+                local = st.session_state.setdefault('confirmed_choice_events', {})
+                listed = {e['id'] for e in events}
+                for key in listed:
+                    local.pop(key, None)
+                if local:
+                    from datetime import datetime
+                    events = sorted(events + list(local.values()),
+                                    key=lambda e: datetime.fromisoformat(e['created']).timestamp())
+                restore_history(store, snapshots, events)
             st.session_state['auto_history_snapshots'] = snapshots
             st.session_state['auto_history_source'] = source_key
             st.session_state.pop('auto_history_result', None)
+        st.session_state['history_ready'] = True
         snapshots = st.session_state['auto_history_snapshots']
         signature = (source_key, tuple(months), hashlib.sha256(settings_backup(store)).hexdigest())
         cached = st.session_state.get('auto_history_result')
@@ -99,27 +105,36 @@ def show_auto_check(st, store, raw, name):
                 results = check_history(raw, name, store, snapshots, months)
             signature = (source_key, tuple(months), hashlib.sha256(settings_backup(store)).hexdigest())
             st.session_state['auto_history_result'] = (signature, results)
-        for item in st.session_state['auto_history_result'][1]:
-            month = item['month']
-            if item.get('missing'):
-                st.info(month + ': nincs ellenőrzött mentés; nem ellenőrizhető.')
-            elif item.get('error'):
-                st.warning(month + ': nem ellenőrizhető. ' + item['error'])
-            else:
-                result = item['result']
-                if not result['changes']:
-                    st.success(month + ': nincs eltérés.')
+        results = st.session_state['auto_history_result'][1]
+        changed = [r for r in results if r.get('result', {}).get('changes')]
+        unavailable = [r for r in results if r.get('missing') or r.get('error') or r.get('unknown_contacts')]
+        if changed or unavailable:
+            parts = []
+            if changed:
+                parts.append('Eltérés: ' + ', '.join(r['month'] for r in changed))
+            if unavailable:
+                parts.append('Nem teljesen ellenőrizhető: ' + ', '.join(r['month'] for r in unavailable))
+            st.warning(' · '.join(parts))
+        else:
+            st.success('Az előző három hónap mentett kész állapotaihoz képest nincs eltérés.')
+        with st.expander('Visszaellenőrzés részletei', expanded=bool(changed)):
+            for item in results:
+                month = item['month']
+                if item.get('missing'):
+                    st.write(month + ': nincs korábbi kész kimutatás.')
+                elif item.get('error'):
+                    st.write(month + ': nem ellenőrizhető. ' + item['error'])
                 else:
-                    st.warning(month + f": {len(result['changes'])} érintett fuvar. Jutalékeltérés: " +
-                               f"{result['difference']:,}".replace(',', ' ') + ' Ft')
-                    with st.expander(month + ' – eltérések részletei'):
-                        st.caption('Összehasonlítás alapja: ' + item['baseline']['created'][:19].replace('T', ' '))
+                    result = item['result']
+                    if item.get('unknown_contacts'):
+                        st.write(month + ': nincs kész mentés ezekhez a fuvarszervezőkhöz: ' + ', '.join(item['unknown_contacts']))
+                    st.write(month + f": {len(result['changes'])} érintett fuvar; jutalékeltérés: " +
+                             f"{result['difference']:,}".replace(',', ' ') + ' Ft')
+                    if result['changes']:
                         st.dataframe(money_display(pd.DataFrame(result['changes'])), hide_index=True)
                         st.dataframe(pd.DataFrame(result['details']), hide_index=True)
                         st.dataframe(money_display(pd.DataFrame(result['monthly'])), hide_index=True)
-                        st.caption('A hiányzó fuvar szűkebb exportot is jelenthet. A különbözet nem kifizetési javaslat.')
-        st.caption('A korábban mentett hónapbesorolásokat automatikusan átvettük. '
-                   'Új ellenőrzött alapot a Drive-archívum fülön menthetsz. '
-                   'Új munkamenetben csak az archívumba elmentett döntések állíthatók vissza.')
+            st.caption('A hiányzó fuvar szűkebb exportot is jelenthet. Az eltérés nem automatikus ráfizetés. '
+                       'Új kész állapot az Excel vagy PDF letöltésekor mentődik.')
     except (ArchiveError, ValueError) as exc:
         st.error('Az automatikus visszaellenőrzés nem sikerült: ' + str(exc))

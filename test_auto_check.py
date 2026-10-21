@@ -56,7 +56,7 @@ class AutoTests(unittest.TestCase):
         self.assertEqual(origin(r,self.new),'2026-08')
         self.new.save_decision(r,'2026-07')
         inherit_settings(self.new,[second])
-        self.assertEqual(origin(r,self.new),'2026-07')
+        self.assertEqual(origin(r,self.new),'2026-08')
     def test_unresolved_one_month_does_not_hide_other_results(self):
         old=self.snapshot(source(rec()),['2026-07','2026-08'])
         inherit_settings(self.new,[old])
@@ -68,7 +68,7 @@ class AutoTests(unittest.TestCase):
         old=self.snapshot(source(rec()),['2026-07'])
         st=MagicMock(); st.session_state={}; st.button.return_value=False
         client=Mock(folder_id='folder'); client.list_snapshots.return_value=[{'id':'saved'}]
-        client.load.return_value=(old,source(rec()))
+        client.load.return_value=(old,source(rec())); client.list_setting_events.return_value=[]
         with patch('archive_ui.archive_client',return_value=client), patch('auto_check.today',return_value=date(2026,10,21)):
             show_auto_check(st,self.new,source(rec()),'a.xlsx')
             show_auto_check(st,self.new,source(rec()),'a.xlsx')
@@ -82,7 +82,7 @@ class AutoTests(unittest.TestCase):
         old=self.snapshot(source(r),['2026-07','2026-08','2026-09'])
         client=Mock(folder_id='folder')
         client.list_snapshots.return_value=[{'id':'saved'}]
-        client.load.return_value=(old,source(r))
+        client.load.return_value=(old,source(r)); client.list_setting_events.return_value=[]
         script='''
 import streamlit as st
 from core import Store
@@ -95,12 +95,12 @@ show_auto_check(st, Store(st.session_state['db']), st.session_state['raw'], 'new
         with patch('archive_ui.archive_client',return_value=client), patch('auto_check.today',return_value=date(2026,10,21)):
             app.run()
             self.assertFalse(app.exception)
-            self.assertEqual(len(app.success),3)
+            self.assertEqual(len(app.success),1)
             app.session_state['raw']=source(rec(currency='HUF',margin='200', dates='2026-07-01, 2026-08-01'))
             app.run()
             self.assertFalse(app.exception)
             self.assertEqual(len(app.warning),1)
-            self.assertIn('Jutalékeltérés: 10 Ft', app.warning[0].value)
+            self.assertIn('Eltérés: 2026-07', app.warning[0].value)
             self.assertEqual(origin(r,self.new),'2026-07')
             self.assertEqual(client.list_snapshots.call_count,2)
         client.save.assert_not_called()

@@ -20,6 +20,7 @@ class App(types.ModuleType):
         super().__init__('streamlit')
         self.session_state=State();self.secrets={};self.sidebar=Surface(self)
         self.data=data;self.submit=True;self.messages=[];self.options=[]
+    def fragment(self,*a,**kw):return lambda fn:fn
     def tabs(self,names):return [Surface(self) for _ in names]
     def columns(self,n):return [Surface(self) for _ in range(n)]
     def spinner(self,*args,**kwargs):return Surface(self)
@@ -49,7 +50,9 @@ class MonthAssignmentTests(unittest.TestCase):
         self.ui=App(self.data)
     def tearDown(self):self.tmp.cleanup()
     def run_app(self):
-        with patch.dict(sys.modules,{'streamlit':self.ui}),patch.dict(os.environ,{'JUTALEK_DB':str(self.db),'JUTALEK_PASSWORD':''}):
+        def persist(st,store,record,action,month,note):
+            store.save_decision(record,month,note)
+        with patch('persistence.persist_choice',side_effect=persist),patch.dict(sys.modules,{'streamlit':self.ui}),patch.dict(os.environ,{'JUTALEK_DB':str(self.db),'JUTALEK_PASSWORD':''}):
             runpy.run_path(str(Path(__file__).with_name('app.py')),run_name='__main__')
     def test_saved_with_blank_note_and_removed_after_rerun(self):
         with self.assertRaises(Rerun):self.run_app()
