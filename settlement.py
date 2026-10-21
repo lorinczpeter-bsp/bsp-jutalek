@@ -26,7 +26,7 @@ def resolved_months(records,store):
     result={}
     for r in records:
         d=decisions.get(r.key)
-        result[r.key]=moved.get(r.key) or (r.months[0] if len(r.months)==1 else (d[1] if d and d[0]==r.signature else None))
+        result[r.key]=moved.get(r.key) or (d[1] if d else (r.months[0] if len(r.months)==1 else None))
     return result
 
 def reassign(store,record,month,note=''):

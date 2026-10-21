@@ -10,6 +10,7 @@ from settlement import filename_stem,overrides
 from ui_features import show_reassign,show_payments,show_analytics
 from web_session import session_store,settings_backup,restore_panel
 from archive_ui import show_archive
+from auto_check import show_auto_check
 
 ROOT=Path(__file__).parent
 st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo_ui.png"),layout="wide")
@@ -88,7 +89,7 @@ with st.sidebar:
     st.caption("A feltöltött adatok ebben a munkamenetben maradnak. Az átsorolásokat és árfolyamokat JSON-mentéssel viheted tovább.")
     st.download_button("Beállítások mentése (JSON)",settings_backup(store),
         file_name=f"jutalek_beallitasok_{today()}.json",mime="application/json")
-    st.caption("v2.2.0 · Streamlit web")
+    st.caption("v2.3.0 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
@@ -160,7 +161,7 @@ kimaradnak és a kimutatás hiányosként jelenik meg. A negatív árrés piros 
     st.write("A fuvarlista és a beállítások felhasználónként külön munkamenetben vannak. Új munkamenet vagy szerver-újraindítás után töltsd fel újra a fuvarlistát, és szükség esetén a mentett JSON-beállításokat.")
     st.write("Korábbi kifizetést csak a korábbi kimutatás opcionális feltöltése és megerősítése után ellenőrzünk. Az elemzés mindig a teljes számított jutalékot mutatja, kifizetési oszlopok nélkül.")
     st.subheader("Drive-archívum")
-    st.write("A beállított céges Drive-mappában a teljes forrás-Excel, a hónapdöntések, átsorolások, pontos árfolyamok és az ellenőrzött hónapok számított jutalékai külön állapotként menthetők. A Drive-archívum fülön választhatsz korábbi alapállapotot, és az új feltöltéssel összehasonlíthatod. A mentés nem lezárás és nem kifizetés; a hiányzó fuvar nem feltétlenül törölt fuvar. A csatlakoztatás leírása: DRIVE_ARCHIVUM_BEALLITAS.md.")
+    st.write("A beállított céges Drive-mappában a teljes forrás-Excel, a hónapdöntések, átsorolások, pontos árfolyamok és az ellenőrzött hónapok számított jutalékai külön állapotként menthetők. Új feltöltéskor a fő fül automatikusan ellenőrzi az előző három naptári hónapot, és átveszi a hiányzó archivált hónapdöntéseket. A Drive-archívum fülön más időszakot is összehasonlíthatsz, és új ellenőrzött alapot menthetsz. A mentés nem lezárás és nem kifizetés; a hiányzó fuvar nem feltétlenül törölt fuvar. A csatlakoztatás leírása: DRIVE_ARCHIVUM_BEALLITAS.md.")
     restore_panel(st,store)
     st.subheader("Árfolyam kézi rögzítése")
     st.caption("Csak automatikus lekérdezési hiba esetére. A forrást és az indoklást is rögzíteni kell; a mentett árfolyam nem írható felül.")
@@ -200,7 +201,8 @@ with work_tab:
             st.dataframe(pd.DataFrame(errors),hide_index=True)
             st.stop()
         st.session_state.source_bundle=(source_hash,headers,records,errors)
-        all_months=sorted({m for r in records for m in r.months}|set(overrides(store).values()))
+        show_auto_check(st,store,raw,st.session_state.source_name)
+        all_months=sorted({m for r in records for m in r.months}|{origin(r,store) for r in records if origin(r,store)}|set(overrides(store).values()))
         start=min(all_months)
         choices=all_months
         from datetime import timedelta

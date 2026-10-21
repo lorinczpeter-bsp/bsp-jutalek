@@ -5,7 +5,7 @@ import json
 
 import pandas as pd
 
-from core import today
+from core import today, origin
 from drive_archive import ArchiveError, DriveArchive, build_snapshot, compare_snapshots
 from exports import ft
 from ui_features import money_display
@@ -69,8 +69,8 @@ def show_archive(st, store, bundle, raw=None, source_name='fuvarlista.xlsx'):
                 st.download_button('Archivált beállítások letöltése (JSON)',
                                    json.dumps(baseline['settings'], ensure_ascii=False, indent=2).encode(),
                                    file_name='jutalek_archivalt_beallitasok.json', mime='application/json', key='archive_settings_download')
-                st.caption('Új munkamenetben az átsorolások és pontos árfolyamok átvételéhez töltsd vissza '
-                           'az archivált beállításokat. Kifizetési előzményt ez nem állít vissza.')
+                st.caption('A fő fül automatikusan átveszi a hiányzó mentett beállításokat. Itt a kiválasztott '
+                           'archívum beállításait kifejezetten felülírással is átveheted. Kifizetési előzményt ez nem állít vissza.')
                 accepted = st.checkbox('Átveszem az archivált dátumdöntéseket, átsorolásokat és árfolyamokat. '
                                        'Az azonos kulcsú helyi beállításokat felülírja.', key='archive_restore_confirm')
                 if st.button('Archivált beállítások átvétele', disabled=not accepted, key='archive_restore'):
@@ -88,7 +88,7 @@ def show_archive(st, store, bundle, raw=None, source_name='fuvarlista.xlsx'):
             st.error('A forrás hibás sorokat tartalmaz. Javítsd a forrást; addig ellenőrzött állapot nem menthető.')
             return
         available = sorted({m for r in records for m in r.months} |
-                           {store.override(r) for r in records if store.override(r)} |
+                           {origin(r, store) for r in records if origin(r, store)} |
                            set(baseline['months'] if baseline else []))
         defaults = baseline['months'] if baseline else [m for m in available if m < today().strftime('%Y-%m')]
         scope_key = 'archive_months_' + (baseline['id'] if baseline else 'first')
@@ -154,6 +154,7 @@ def show_archive(st, store, bundle, raw=None, source_name='fuvarlista.xlsx'):
             st.session_state.pop('archive_files', None)
             st.session_state.pop('archive_loaded', None)
             st.session_state.pop('archive_baseline', None)
+            st.session_state.pop('auto_history_source', None)
             st.rerun()
     except (ArchiveError, ValueError) as exc:
         st.error(str(exc))

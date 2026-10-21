@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 import openpyxl
 
 from core import DATE, MARGIN, Store
-from drive_archive import (ArchiveError, DriveArchive, build_snapshot, compare_snapshots,
+from drive_archive import (ArchiveError, DriveRequestError, DriveArchive, build_snapshot, compare_snapshots,
                            decode_snapshot, encode_snapshot)
 from settlement import import_payments, reassign
 from test_core import HEADERS, fx, rec
@@ -152,6 +152,109 @@ class ArchiveTests(unittest.TestCase):
 
 
 class DriveTransportTests(unittest.TestCase):
+    @patch('drive_archive.time.sleep')
+    def test_complete_save_survives_500_on_metadata_and_binary_readback(self, sleep):
+        with tempfile.TemporaryDirectory() as d:
+            raw = source(rec(currency='HUF'))
+            s = build_snapshot(raw, 'source.xlsx', Store(Path(d) / 'db'), ['2026-07'])
+            client = self.client(); client.check_folder = Mock(); client.list_snapshots = Mock(return_value=[])
+            created = Mock(ok=True)
+            created.json.return_value = {'id': 'saved', 'name': 'archive.zip'}
+            metadata = Mock(ok=True)
+            metadata.json.return_value = {'parents': ['folder'], 'size': 100,
+                                          'appProperties': {'babolna_archive': 'v1'}}
+            downloaded = Mock(ok=True, content=encode_snapshot(s, raw))
+            client.http.request.side_effect = [created, Mock(ok=False, status_code=500), metadata,
+                                                Mock(ok=False, status_code=500), Mock(ok=False, status_code=503), downloaded]
+            self.assertEqual(client.save(s, raw), {'id': 'saved', 'name': 'archive.zip'})
+            self.assertEqual([call.args[0] for call in client.http.request.call_args_list],
+                             ['POST', 'GET', 'GET', 'GET', 'GET', 'GET'])
+            self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 1, 2])
+
+    @patch('drive_archive.time.sleep')
+    def test_transient_reads_retry_and_recover_without_false_permission_message(self, sleep):
+        import requests
+        for failures in ([Mock(ok=False, status_code=500), Mock(ok=False, status_code=503)],
+                         [requests.Timeout('private details'), requests.ConnectionError('private details')]):
+            client = self.client(); success = Mock(ok=True)
+            client.http.request.side_effect = list(failures) + [success]
+            self.assertIs(client._request('GET', 'drive/v3/files'), success)
+            self.assertEqual(client.http.request.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [1, 2, 1, 2])
+
+    @patch('drive_archive.time.sleep')
+    def test_persistent_server_error_is_distinct_from_permission_and_is_bounded(self, sleep):
+        client = self.client()
+        client.http.request.return_value = Mock(ok=False, status_code=500)
+        with self.assertRaises(DriveRequestError) as caught: client._request('GET', 'drive/v3/files')
+        self.assertEqual(client.http.request.call_count, 3)
+        self.assertTrue(caught.exception.transient)
+        self.assertIn('Átmeneti Drive-hiba', str(caught.exception))
+        self.assertIn('archívumlista beolvasása', str(caught.exception))
+        self.assertNotIn('Ellenőrizd az API-t', str(caught.exception))
+
+    @patch('drive_archive.time.sleep')
+    def test_rate_limit_can_retry_but_permission_denial_does_not(self, sleep):
+        for status, reason, expected in [(429, '', 3), (403, 'rateLimitExceeded', 3),
+                                         (403, 'userRateLimitExceeded', 3), (403, 'insufficientFilePermissions', 1),
+                                         (404, '', 1)]:
+            client = self.client()
+            response = Mock(ok=False, status_code=status)
+            response.json.return_value = {'error': {'errors': [{'reason': reason}]}}
+            client.http.request.return_value = response
+            with self.assertRaises(DriveRequestError):client._request('GET', 'drive/v3/files')
+            self.assertEqual(client.http.request.call_count, expected)
+
+    @patch('drive_archive.time.sleep')
+    def test_upload_request_itself_is_never_blindly_retried(self, sleep):
+        client = self.client()
+        client.http.request.return_value = Mock(ok=False, status_code=500)
+        with self.assertRaises(DriveRequestError):client._request('POST', 'upload/drive/v3/files')
+        self.assertEqual(client.http.request.call_count, 1)
+        sleep.assert_not_called()
+
+    @patch('drive_archive.time.sleep')
+    def test_uncertain_upload_finds_saved_snapshot_and_verifies_without_second_post(self, sleep):
+        with tempfile.TemporaryDirectory() as d:
+            raw = source(rec(currency='HUF'))
+            s = build_snapshot(raw, 'source.xlsx', Store(Path(d) / 'db'), ['2026-07'])
+            client = self.client(); client.check_folder = Mock()
+            saved = {'id': 'saved', 'name': 'archive.zip', 'appProperties': {'snapshot_id': s['id']}}
+            client.list_snapshots = Mock(side_effect=[[], [], [saved]])
+            client._request = Mock(side_effect=DriveRequestError('temporary', status=500, transient=True))
+            client.load = Mock(return_value=(s, raw))
+            self.assertEqual(client.save(s, raw), saved)
+            self.assertEqual(client._request.call_count, 1)
+            client.load.assert_called_once_with('saved')
+            # Recovery never treats a mismatching payload as a successful save.
+            client.list_snapshots = Mock(side_effect=[[], [saved]])
+            client.load.return_value = (dict(s, note='different'), raw)
+            with self.assertRaisesRegex(ArchiveError, 'visszaellenőrzése'):client.save(s, raw)
+
+    @patch('drive_archive.time.sleep')
+    def test_uncertain_upload_without_match_stays_unconfirmed_and_never_uploads_twice(self, sleep):
+        with tempfile.TemporaryDirectory() as d:
+            raw = source(rec(currency='HUF'))
+            s = build_snapshot(raw, 'source.xlsx', Store(Path(d) / 'db'), ['2026-07'])
+            client = self.client(); client.check_folder = Mock(); client.list_snapshots = Mock(return_value=[])
+            client._request = Mock(side_effect=DriveRequestError('temporary', status=500, transient=True))
+            client.load = Mock()
+            with self.assertRaisesRegex(DriveRequestError, 'Nem indítottunk ismételt feltöltést'):client.save(s, raw)
+            self.assertEqual(client._request.call_count, 1)
+            self.assertEqual(client.list_snapshots.call_count, 4)
+            client.load.assert_not_called()
+
+    def test_confirmed_upload_with_unavailable_readback_is_not_called_failed_upload(self):
+        with tempfile.TemporaryDirectory() as d:
+            raw = source(rec(currency='HUF'))
+            s = build_snapshot(raw, 'source.xlsx', Store(Path(d) / 'db'), ['2026-07'])
+            client = self.client(); client.check_folder = Mock(); client.list_snapshots = Mock(return_value=[])
+            client._request = Mock(return_value=Mock(**{'json.return_value': {'id': 'saved', 'name': 'archive.zip'}}))
+            client.load = Mock(side_effect=DriveRequestError('Átmeneti Drive-hiba (500)', status=500, transient=True))
+            with self.assertRaisesRegex(DriveRequestError, 'fájlja létrejött') as caught:client.save(s, raw)
+            self.assertTrue(caught.exception.transient)
+            self.assertEqual(client._request.call_count, 1)
+
     def test_credential_diagnostics_and_newline_normalization_without_secret_leak(self):
         from google.oauth2.service_account import Credentials
         from google.auth.transport.requests import AuthorizedSession

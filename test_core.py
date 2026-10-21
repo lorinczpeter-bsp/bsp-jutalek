@@ -31,13 +31,14 @@ class Tests(unittest.TestCase):
         p=self.plan([a,b])
         self.assertEqual(p["total"],4000)
         self.assertFalse(p["blockers"]);self.assertTrue(p["lines"][1]["negative"])
-    def test_cross_month_requires_choice_and_invalidates(self):
+    def test_cross_month_requires_choice_and_retains_assignment(self):
         a=rec(dates="2026-07-01, 2026-08-05")
         self.assertTrue(self.plan([a],"2026-08")["blockers"])
         self.s.save_decision(a,"2026-07","Ellenőrizve")
         self.assertFalse(self.plan([a])["blockers"])
         a.original[DATE]="2026-07-01, 2026-09-01";a.dates=parse_dates(a.original[DATE]);a.signature=fingerprint(a.original)
-        self.assertTrue(self.plan([a],"2026-09")["blockers"])
+        self.assertFalse(self.plan([a],"2026-09")["blockers"])
+        self.assertEqual(origin(a,self.s),"2026-07")
     def test_repeat_close_and_late_and_changed(self):
         a=rec()
         p=self.plan([a]);self.s.close(p)

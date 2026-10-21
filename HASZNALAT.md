@@ -1,4 +1,4 @@
-# Bábolna Sped – Alvállalkozói jutalékelszámolás v2.2.0
+# Bábolna Sped – Alvállalkozói jutalékelszámolás v2.3.0
 
 ## Streamlit webes használat
 A telepítés lépései a STREAMLIT_CLOUD.md fájlban találhatók. A belépési fájl app.py.
@@ -81,3 +81,30 @@ Az archívum a teljes eredeti Excelt és a beállításokat is őrzi. Korábbi e
 forráslistát első alapként feltölthetsz és elmenthetsz. Az archivált forrás
 letölthető, az átsorolások és árfolyamok külön megerősítéssel átvehetők az új
 munkamenetbe. Kifizetési jelölés nem mentődik és nem állítódik vissza.
+
+
+## Automatikus visszaellenőrzés (v2.3.0)
+Új Excel feltöltésekor a fő fülön automatikusan megjelenik az aktuális naptári
+hónap előtti három hónap ellenőrzése. Például 2026 októberében július, augusztus
+és szeptember. Minden hónaphoz a saját legutóbbi ellenőrzött archívumát használja.
+Nem kell megnyitni a Drive-archívum fület vagy külön alapállapotot választani.
+Az Automatikus ellenőrzés frissítése gombbal azonos fájlnál is újraolvasható az archívum.
+
+Az archivált dátumdöntések, átsorolások és pontos árfolyamok hiányzó helyi kulcsait
+automatikusan visszaveszi; a jelen munkamenetben megadott beállításokat nem írja felül.
+A legújabb mentésben szereplő döntés az elsődleges. A hónapdöntés a fuvarszámhoz
+kötött: összeg- vagy dátummódosítás után is érvényben marad. Az eredeti forrásdátum
+változását ettől függetlenül jelzi, ugyanígy az új/hiányzó fuvart, módosult
+jutalékot, fuvarszervezőt vagy más forrásmezőt. A normál kimutatás és az elemzés
+ugyanazt a megőrzött hónapbesorolást használja.
+
+Hónaponként külön eredmény: nincs eltérés / eltérés / nem ellenőrizhető.
+Hiányzó alapállapot vagy rendezetlen új dátumdöntés esetén nem állít eltérésmentességet.
+A teljes korábbi időszakot, minden fuvarszervezőt tartalmazó export szükséges.
+A hiányzó sor nem bizonyít törlést.
+
+Új összehasonlítási alapot továbbra is kézzel, az Ellenőrzött állapot mentése
+gombbal kell elfogadni a Drive-archívumban. Az automatikus ellenőrzés nem ment
+új alapot, nem zár hónapot és nem jelöl kifizetést. Új munkamenetben csak a
+Drive-archívumba elmentett hónapdöntések állíthatók automatikusan vissza;
+a még nem archivált döntéshez a külön JSON-mentés is használható.

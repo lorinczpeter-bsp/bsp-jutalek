@@ -171,7 +171,7 @@ class Store:
 
     def decision(self, record):
         with self.connect() as c:
-            r = c.execute("SELECT month FROM decisions WHERE freight=? AND signature=?", (record.key,record.signature)).fetchone()
+            r = c.execute("SELECT month FROM decisions WHERE freight=?", (record.key,)).fetchone()
         return r[0] if r else None
 
     def save_decision(self, record, month, note=""):
@@ -284,7 +284,7 @@ def fetch_mnb(month):
             "count":len(daily),"daily":daily,"retrieved":datetime.now(ZoneInfo("Europe/Budapest")).isoformat()}
 
 def origin(record, store):
-    return store.override(record) or (record.months[0] if len(record.months)==1 else store.decision(record))
+    return store.override(record) or store.decision(record) or (record.months[0] if len(record.months)==1 else None)
 
 def build_plan(records, headers, store, month, contact, source_hash, rate_provider=None, errors=None, snapshot=False):
     initial_revision = store.revision()

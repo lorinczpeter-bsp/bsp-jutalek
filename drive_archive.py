@@ -17,7 +17,7 @@ from core import (CONTACT, CURRENCY, DATE, KEY, MARGIN, build_plan, dec,
                   load_workbook, origin, valid_month)
 from web_session import settings_backup
 
-APP_VERSION = '2.2.0'
+APP_VERSION = '2.3.0'
 CALC_VERSION = 'commission-v2-mixed-monthly-fx'
 FORMAT = 'babolna-jutalek-archive-v1'
 MAX_SOURCE = 40 * 1024 * 1024

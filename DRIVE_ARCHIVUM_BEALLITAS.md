@@ -131,8 +131,16 @@ egymás mellett megmarad; lista frissítésével kérd le mások új mentéseit.
 - Az archiválás nem indít kifizetést, és nem ment kifizetési nyilvántartást.
 - Az app csak az általa készített, megjelölt archívumokat olvassa automatikusan
   a beállított mappából; nem kutatja át a teljes vállalati Drive-ot.
-- Elérési vagy visszaolvasási hibánál ne tekintsd mentettnek az állapotot.
-  Frissítsd az archívumlistát. Azonos állapot ismétlése meglévő azonosítóval
+- Átmeneti 500/502/503/504 hibánál és kéréskorlátozásnál az olvasásokat
+  rövid várakozással, legfeljebb háromszor próbálja meg az app. Ezeknél nem
+  jelenik meg félrevezető, jogosultságmódosítást kérő üzenet.
+- Ha a feltöltés válasza bizonytalan, az állapotazonosító alapján keresi a
+  már létrejött mentést, majd a tartalmát is visszaellenőrzi. A feltöltést nem
+  ismétli meg automatikusan, így a hibakezelés nem készít másodpéldányt.
+- Ha a visszaellenőrzés az újrapróbálások után is sikertelen, nem jelez
+  igazolt mentést. Megkülönbözteti a már létrejött fájlt a még bizonytalan
+  feltöltéstől. Ilyenkor frissítsd az archívumlistát.
+  Azonos állapot ismétlése meglévő azonosítóval
   visszaellenőrizhető anélkül, hogy új fájlt töltene fel.
 
 Hivatalos háttér:
