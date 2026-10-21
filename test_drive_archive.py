@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import openpyxl
 
@@ -152,6 +152,28 @@ class ArchiveTests(unittest.TestCase):
 
 
 class DriveTransportTests(unittest.TestCase):
+    def test_credential_diagnostics_and_newline_normalization_without_secret_leak(self):
+        from google.oauth2.service_account import Credentials
+        from google.auth.transport.requests import AuthorizedSession
+        info = {'client_email': 'example@project.iam.gserviceaccount.com',
+                'token_uri': 'https://oauth2.googleapis.com/token',
+                'private_key': '-----BEGIN PRIVATE KEY-----\nTEST_SECRET\n-----END PRIVATE KEY-----\n'}
+        for key in (info['private_key'], info['private_key'].replace('\n', '\\n'),
+                    info['private_key'].replace('\n', '\\\\n')):
+            with patch.object(Credentials, 'from_service_account_info', return_value=Mock()) as factory:
+                DriveArchive({'folder_id': 'folder'}, dict(info, private_key=key))
+                self.assertEqual(factory.call_args.args[0]['private_key'], info['private_key'])
+        with self.assertRaisesRegex(ArchiveError, 'hiányzik vagy üres'):
+            DriveArchive({'folder_id': 'folder'}, dict(info, token_uri=''))
+        with self.assertRaisesRegex(ArchiveError, 'mintaérték'):
+            DriveArchive({'folder_id': 'folder'}, dict(info, private_key='IDE_A_JSON_PRIVATE_KEY_ERTEKE'))
+        with self.assertRaisesRegex(ArchiveError, 'BEGIN / END'):
+            DriveArchive({'folder_id': 'folder'}, dict(info, private_key='secret'))
+        with patch.object(Credentials, 'from_service_account_info', side_effect=ValueError('TEST_SECRET')):
+            with self.assertRaises(ArchiveError) as caught:
+                DriveArchive({'folder_id': 'folder'}, info)
+            self.assertNotIn('TEST_SECRET', str(caught.exception))
+
     def client(self):
         client = object.__new__(DriveArchive)
         client.folder_id = 'folder'; client.http = Mock()

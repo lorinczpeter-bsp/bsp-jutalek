@@ -257,11 +257,45 @@ class DriveArchive:
         try:
             from google.oauth2.service_account import Credentials
             from google.auth.transport.requests import AuthorizedSession
+        except ImportError as exc:
+            raise ArchiveError('Hiányzik a Drive-hitelesítés egyik programcsomagja. '
+                               'A GitHub requirements.txt fájljában legyen google-auth>=2.40,<3 és requests>=2.32,<3, '
+                               'majd indítsd újra az alkalmazást a Streamlit Manage app → Reboot lehetőségével.') from exc
+        info = dict(service_account_info)
+        missing = [field for field in ('client_email', 'token_uri', 'private_key')
+                   if not isinstance(info.get(field), str) or not info[field].strip()]
+        if missing:
+            raise ArchiveError('A Secrets [gcp_service_account] részéből hiányzik vagy üres: ' + ', '.join(missing) + '.')
+        if any('IDE_' in info[field] for field in ('client_email', 'token_uri', 'private_key')):
+            raise ArchiveError('A Secrets [gcp_service_account] részében mintaérték maradt. '
+                               'A client_email, token_uri és private_key mezőt a saját JSON-fájl alapján töltsd ki.')
+        if not info['client_email'].strip().endswith('.iam.gserviceaccount.com'):
+            raise ArchiveError('A gcp_service_account.client_email nem szolgáltatásfiók-cím. A JSON client_email értékét másold ide.')
+        if info['token_uri'].strip() != 'https://oauth2.googleapis.com/token':
+            raise ArchiveError('A gcp_service_account.token_uri értéke https://oauth2.googleapis.com/token legyen.')
+        # JSON → TOML copying may retain one or two literal backslashes.
+        # PEM base64 has no backslashes, so these replacements are unambiguous.
+        key = info['private_key'].strip().replace('\\\\n', '\n').replace('\\n', '\n').replace('\r\n', '\n').strip()
+        if not key.startswith('-----BEGIN PRIVATE KEY-----') or not key.endswith('-----END PRIVATE KEY-----'):
+            raise ArchiveError('A gcp_service_account.private_key mezőből hiányzik a teljes BEGIN / END PRIVATE KEY keret. '
+                               'A JSON teljes private_key értékét másold át, a keretsorokkal együtt.')
+        if len(key.splitlines()) < 3:
+            raise ArchiveError('A gcp_service_account.private_key sortörései hibásak. '
+                               'A JSON-ban szereplő \\n jelek is tartozzanak a bemásolt értékhez.')
+        info['private_key'] = key + '\n'
+        info['client_email'] = info['client_email'].strip()
+        info['token_uri'] = info['token_uri'].strip()
+        try:
             credentials = Credentials.from_service_account_info(
-                dict(service_account_info), scopes=['https://www.googleapis.com/auth/drive'])
+                info, scopes=['https://www.googleapis.com/auth/drive'])
             self.http = AuthorizedSession(credentials)
-        except (ImportError, ValueError, KeyError) as exc:
-            raise ArchiveError('A Drive-hitelesítés nincs megfelelően beállítva. Ellenőrizd a Secrets beállításait.') from exc
+        except ImportError as exc:
+            raise ArchiveError('A Drive-kulcs feldolgozásához szükséges programcsomag hiányzik. '
+                               'Frissítsd a requirements.txt függőségeit, majd indítsd újra az alkalmazást.') from exc
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ArchiveError('A private_key tartalmát a Google hitelesítési könyvtára nem tudta beolvasni. '
+                               'A kulcs hiányos vagy sérült lehet. A letöltött JSON teljes private_key értékét másold át újra. '
+                               'A kulcsot ne küldd el üzenetben.') from exc
         self.folder_id = folder
 
     def _request(self, method, path, **kwargs):
