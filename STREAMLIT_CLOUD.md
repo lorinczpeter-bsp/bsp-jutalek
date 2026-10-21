@@ -1,7 +1,7 @@
 # Streamlit Community Cloud – telepítés
 
 1. A csomag Babolna_Sped_Jutalek mappájának tartalmát tedd egy GitHub-repozitórium gyökerébe.
-   Az app.py, requirements.txt, core.py, settlement.py, ui_features.py, web_session.py, exports.py,
+   Az app.py, requirements.txt, core.py, settlement.py, ui_features.py, web_session.py, exports.py, drive_archive.py, archive_ui.py,
    assets mappa és .streamlit/config.toml maradjon együtt. A .streamlit mappa rejtett lehet a fájlkezelőben.
 2. Nyisd meg a https://share.streamlit.io/ oldalt és hozz létre új alkalmazást.
 3. Válaszd ki a repozitóriumot, az ágat és belépési fájlként az app.py-t.
@@ -21,8 +21,8 @@
   Visszatöltés: Használat és beállítások → Mentett beállítások visszatöltése.
 - A JSON-mentés nem tartalmaz fuvarlistát, kifizetési állapotot vagy jelszót.
 - Régi kifizetés ellenőrzéséhez új munkamenetben töltsd fel újra a korábbi kimutatást.
-- Nincs megosztott, automatikusan tartós cloud-adatbázis. Ha később több felhasználó között
-  közös, tartós nyilvántartás szükséges, külön adattárolót kell csatlakoztatni.
+- Opcionális közös Drive-archívum: a DRIVE_ARCHIVUM_BEALLITAS.md alapján csatlakoztatható.
+  Ellenőrzött állapotot, eredeti forrást és beállításokat őriz, lezárás vagy kifizetési jelölés nélkül.
 
 A csomag nem tartalmaz éles céges adatot és jelszót. A telepítéshez szükséges fájlok készen állnak;
 a repozitórium létrehozása és a Streamlit Cloudhoz kapcsolása még szükséges.

@@ -9,6 +9,7 @@ from exports import make_excel, make_pdf, ft, display_rows
 from settlement import filename_stem,overrides
 from ui_features import show_reassign,show_payments,show_analytics
 from web_session import session_store,settings_backup,restore_panel
+from archive_ui import show_archive
 
 ROOT=Path(__file__).parent
 st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo_ui.png"),layout="wide")
@@ -20,6 +21,13 @@ def auth():
     except (FileNotFoundError,st.errors.StreamlitSecretNotFoundError):
         pass
     if not password:
+        try:
+            drive_enabled=bool(st.secrets.get("drive_archive",{}).get("folder_id"))
+        except (FileNotFoundError,st.errors.StreamlitSecretNotFoundError):
+            drive_enabled=False
+        if drive_enabled:
+            st.error("A közös Drive-archívum használatához állíts be app_password belépési jelszót a Secretsben.")
+            st.stop()
         return
     if not st.session_state.get("authenticated"):
         st.image(str(ROOT/"assets"/"logo_ui.png"),width=240)
@@ -80,13 +88,13 @@ with st.sidebar:
     st.caption("A feltöltött adatok ebben a munkamenetben maradnak. Az átsorolásokat és árfolyamokat JSON-mentéssel viheted tovább.")
     st.download_button("Beállítások mentése (JSON)",settings_backup(store),
         file_name=f"jutalek_beallitasok_{today()}.json",mime="application/json")
-    st.caption("v2.1.1 · Streamlit web")
+    st.caption("v2.2.0 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
 feedback=st.session_state.pop("decision_feedback",None)
 if feedback:st.success(feedback)
-work_tab,reassign_tab,payment_tab,analytics_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Korábbi kimutatás (opcionális)","Jutalékelemzés","Használat és beállítások"])
+work_tab,reassign_tab,payment_tab,analytics_tab,archive_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Korábbi kimutatás (opcionális)","Jutalékelemzés","Drive-archívum","Használat és beállítások"])
 
 def downloads(plan,prefix):
     # Csak a gomb megnyomásakor készülnek a nagyobb kimenetek.
@@ -151,6 +159,8 @@ kimaradnak és a kimutatás hiányosként jelenik meg. A negatív árrés piros 
     st.subheader("Webes munkamenet")
     st.write("A fuvarlista és a beállítások felhasználónként külön munkamenetben vannak. Új munkamenet vagy szerver-újraindítás után töltsd fel újra a fuvarlistát, és szükség esetén a mentett JSON-beállításokat.")
     st.write("Korábbi kifizetést csak a korábbi kimutatás opcionális feltöltése és megerősítése után ellenőrzünk. Az elemzés mindig a teljes számított jutalékot mutatja, kifizetési oszlopok nélkül.")
+    st.subheader("Drive-archívum")
+    st.write("A beállított céges Drive-mappában a teljes forrás-Excel, a hónapdöntések, átsorolások, pontos árfolyamok és az ellenőrzött hónapok számított jutalékai külön állapotként menthetők. A Drive-archívum fülön választhatsz korábbi alapállapotot, és az új feltöltéssel összehasonlíthatod. A mentés nem lezárás és nem kifizetés; a hiányzó fuvar nem feltétlenül törölt fuvar. A csatlakoztatás leírása: DRIVE_ARCHIVUM_BEALLITAS.md.")
     restore_panel(st,store)
     st.subheader("Árfolyam kézi rögzítése")
     st.caption("Csak automatikus lekérdezési hiba esetére. A forrást és az indoklást is rögzíteni kell; a mentett árfolyam nem írható felül.")
@@ -177,6 +187,8 @@ with work_tab:
         help="A teljes eredeti exportot töltsd fel, a Fuvarlista munkalappal.")
     if uploaded:
         raw=uploaded.getvalue()
+        st.session_state.source_raw=raw
+        st.session_state.source_name=getattr(uploaded,"name","fuvarlista.xlsx")
         source_hash=hashlib.sha256(raw).hexdigest()
         try:
             headers,records,errors=load_workbook(raw)
@@ -262,9 +274,12 @@ with work_tab:
         downloads(plan,"draft")
     else:
         st.session_state.pop("source_bundle",None)
+        st.session_state.pop("source_raw",None)
+        st.session_state.pop("source_name",None)
         st.info("Töltsd fel a fuvarlistát az elszámolás elkészítéséhez.")
 
 bundle=st.session_state.get("source_bundle")
 with reassign_tab:show_reassign(st,store,bundle)
 with payment_tab:show_payments(st,store,bundle)
 with analytics_tab:show_analytics(st,store,bundle)
+with archive_tab:show_archive(st,store,bundle,st.session_state.get("source_raw"),st.session_state.get("source_name","fuvarlista.xlsx"))

@@ -1,4 +1,4 @@
-# Bábolna Sped – Alvállalkozói jutalékelszámolás v2.1.0
+# Bábolna Sped – Alvállalkozói jutalékelszámolás v2.2.0
 
 ## Streamlit webes használat
 A telepítés lépései a STREAMLIT_CLOUD.md fájlban találhatók. A belépési fájl app.py.
@@ -59,3 +59,25 @@ Visszatöltés: Használat és beállítások → Mentett beállítások visszat
 A mentés nem tartalmaz fuvarlistát vagy kifizetési állapotot. Korábbi kifizetés ellenőrzéséhez
 az opcionális fülön töltsd fel újra a kifizetett kimutatást.
 Jelszó a Streamlit Secretsben: app_password. A tényleges secrets.toml fájlt ne tedd GitHubra.
+
+## Drive-archívum és korábbi hónapok összehasonlítása
+A v2.2.0 külön Drive-archívum fület ad. A beállításokat a
+DRIVE_ARCHIVUM_BEALLITAS.md részletesen tartalmazza. A funkció nélkül
+a korábbi munkafolyamat változatlanul használható.
+
+A csatlakoztatás után töltsd fel a teljes forráslistát, nyisd meg a Drive-archívumot,
+és válaszd ki az ellenőrzött hónapokat. A mentés minden érintett fuvarszervezőre
+vonatkozik. Teljességi megerősítés után külön, dátumozott állapotot menthetsz.
+A korábbi fájlokat az app nem írja felül. A mentés nem lezárás és nem kifizetés.
+
+Következő feltöltéskor a megnyitott archívum a kiválasztott korábbi állapottal
+vet össze: új / hiányzó fuvarok, változott mezők, hónap- és fuvarszervezőváltás,
+árfolyamkülönbség, számított jutalék régi és új értéke. Havi és személyenkénti
+bontás is látható. Csak a mindkét állapotban ellenőrzött hónapokat hasonlítjuk.
+A hiányzó fuvar lehet szűkebb export következménye, ezért nem minősítjük törlésnek.
+A különbözetből nincs automatikus ráfizetés vagy visszavonás.
+
+Az archívum a teljes eredeti Excelt és a beállításokat is őrzi. Korábbi eredeti
+forráslistát első alapként feltölthetsz és elmenthetsz. Az archivált forrás
+letölthető, az átsorolások és árfolyamok külön megerősítéssel átvehetők az új
+munkamenetbe. Kifizetési jelölés nem mentődik és nem állítódik vissza.
