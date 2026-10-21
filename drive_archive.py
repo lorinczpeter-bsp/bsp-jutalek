@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import re
+import time
 import uuid
 import zipfile
 from collections import defaultdict
@@ -27,6 +28,14 @@ NUMERIC = {MARGIN, 'Díj', 'Alvállalkozói díj', 'Árrés (állapot szerint)'}
 
 class ArchiveError(ValueError):
     pass
+
+
+class DriveRequestError(ArchiveError):
+    """Safe message plus machine-readable retry classification; no credential data."""
+    def __init__(self, message, *, status=None, transient=False):
+        super().__init__(message)
+        self.status = status
+        self.transient = transient
 
 
 def number(value):
@@ -301,14 +310,59 @@ class DriveArchive:
     def _request(self, method, path, **kwargs):
         import requests
         from google.auth.exceptions import GoogleAuthError
-        try:
-            response = self.http.request(method, 'https://www.googleapis.com/' + path, timeout=90, **kwargs)
-        except (requests.RequestException, GoogleAuthError) as exc:
-            raise ArchiveError('A Drive nem érhető el. A mentés / beolvasás nem igazolható; frissítsd az archívumlistát.') from exc
-        if not response.ok:
-            raise ArchiveError(f'Drive-hiba ({response.status_code}). Ellenőrizd az API-t és a mappa jogosultságát. '
-                               'Szolgáltatásfióknál céges megosztott meghajtó szükséges. Sikeres mentést nem igazoltunk.')
-        return response
+        method = method.upper()
+        if path.startswith('upload/'):
+            operation = 'állapot feltöltése'
+        elif path == 'drive/v3/files':
+            operation = 'archívumlista beolvasása'
+        elif kwargs.get('params', {}).get('alt') == 'media':
+            operation = 'archívum visszaolvasása'
+        else:
+            operation = 'Drive-mappa vagy fájl ellenőrzése'
+        # Only retry reads. An uncertain POST may already have created the file.
+        attempts = 3 if method in {'GET', 'HEAD'} else 1
+        for attempt in range(attempts):
+            if attempt:
+                time.sleep(2 ** (attempt - 1))
+            try:
+                response = self.http.request(method, 'https://www.googleapis.com/' + path,
+                                             timeout=(10, 30), **kwargs)
+            except GoogleAuthError as exc:
+                raise DriveRequestError('A Google-hitelesítés sikertelen (' + operation + '). '
+                                        'Ellenőrizd a szolgáltatásfiók kulcsának érvényességét.',
+                                        status=401) from exc
+            except requests.RequestException as exc:
+                if attempt + 1 < attempts:
+                    continue
+                raise DriveRequestError('Átmeneti Drive-kapcsolati hiba (' + operation + '). '
+                                        'A művelet eredménye nem igazolható; frissítsd az archívumlistát.',
+                                        transient=True) from exc
+            if response.ok:
+                return response
+            status = response.status_code
+            limited = status == 429
+            if status == 403:
+                try:
+                    reasons = {e.get('reason') for e in response.json()['error'].get('errors', [])}
+                    limited = bool(reasons & {'rateLimitExceeded', 'userRateLimitExceeded'})
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    pass
+            transient = limited or status in {408, 500, 502, 503, 504}
+            if transient and attempt + 1 < attempts:
+                continue
+            if transient:
+                message = f'Átmeneti Drive-hiba ({status}; {operation}). '
+                message += ('Az automatikus újrapróbálás sem sikerült. ' if attempts > 1 else '')
+                message += 'Frissítsd az archívumlistát, vagy próbáld később. Ez a hiba önmagában nem jelez jogosultsági problémát.'
+            elif status == 403:
+                message = f'A Drive megtagadta a hozzáférést (403; {operation}). Ellenőrizd a szolgáltatásfiók mappajogosultságát és a Drive API engedélyezését.'
+            elif status == 404:
+                message = f'A Drive-mappa vagy fájl nem található vagy nem hozzáférhető (404; {operation}). Ellenőrizd a mappaazonosítót és a megosztást.'
+            elif status == 401:
+                message = f'A Drive nem fogadta el a hitelesítést (401; {operation}). Ellenőrizd a szolgáltatásfiók kulcsát.'
+            else:
+                message = f'A Drive nem fogadta el a kérést ({status}; {operation}). A művelet nem igazolható.'
+            raise DriveRequestError(message, status=status, transient=transient)
 
     def check_folder(self):
         data = self._request('GET', 'drive/v3/files/' + self.folder_id,
@@ -368,11 +422,43 @@ class DriveArchive:
                 json.dumps(metadata).encode() +
                 f'\r\n--{boundary}\r\nContent-Type: application/zip\r\n\r\n'.encode() + data +
                 f'\r\n--{boundary}--\r\n'.encode())
-        result = self._request('POST', 'upload/drive/v3/files',
-                               params={'uploadType': 'multipart', 'supportsAllDrives': 'true', 'fields': 'id,name,size'},
-                               headers={'Content-Type': f'multipart/related; boundary={boundary}'}, data=body).json()
+        try:
+            result = self._request('POST', 'upload/drive/v3/files',
+                                   params={'uploadType': 'multipart', 'supportsAllDrives': 'true', 'fields': 'id,name,size'},
+                                   headers={'Content-Type': f'multipart/related; boundary={boundary}'}, data=body).json()
+        except DriveRequestError as exc:
+            if not exc.transient:
+                raise
+            # The server may have accepted the ZIP but lost the response. Find
+            # that exact snapshot and verify it instead of uploading a duplicate.
+            result = None
+            for delay in (0, 1, 2):
+                if delay:
+                    time.sleep(delay)
+                try:
+                    matches = [f for f in self.list_snapshots()
+                               if f.get('appProperties', {}).get('snapshot_id') == archive_id]
+                except DriveRequestError as recovery_error:
+                    if recovery_error.transient:
+                        continue
+                    raise DriveRequestError('A feltöltés eredménye bizonytalan, és az archívumlista ellenőrzése is sikertelen. '
+                                            'Frissítsd az archívumlistát; ne indíts újabb mentést ellenőrzés nélkül.',
+                                            status=recovery_error.status) from recovery_error
+                if matches:
+                    result = matches[0]
+                    break
+            if result is None:
+                raise DriveRequestError('A Drive átmeneti hibája miatt a feltöltés eredménye nem igazolható. '
+                                        'Az ellenőrzés még nem találta meg ezt az állapotot. '
+                                        'Nem indítottunk ismételt feltöltést. Frissítsd az archívumlistát, majd próbáld később.',
+                                        status=exc.status, transient=True) from exc
         # Read-back is deliberately required before a successful archive message.
-        saved, saved_raw = self.load(result['id'])
+        try:
+            saved, saved_raw = self.load(result['id'])
+        except DriveRequestError as exc:
+            raise DriveRequestError('Az archívum fájlja létrejött a Drive-on, de a tartalom visszaellenőrzése még nem sikerült. '
+                                    'Frissítsd az archívumlistát; újabb feltöltés nem szükséges. '
+                                    + str(exc), status=exc.status, transient=exc.transient) from exc
         if saved != snapshot or saved_raw != raw:
             raise ArchiveError('A Drive-mentés visszaellenőrzése sikertelen. Ne ments újra automatikusan; frissítsd a listát.')
         return result
