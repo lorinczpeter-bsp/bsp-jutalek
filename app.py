@@ -90,7 +90,7 @@ with st.sidebar:
     st.caption("Árrés extra számlasorokkal • Teljesítés időpontja")
     st.divider()
     st.caption("A hónapdöntések automatikusan mentődnek. Excel vagy PDF letöltésekor a kész állapot a Drive-ra kerül.")
-    st.caption("v2.4.1 · Streamlit web")
+    st.caption("v2.4.2 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
@@ -98,26 +98,26 @@ feedback=st.session_state.pop("decision_feedback",None)
 if feedback:st.success(feedback)
 work_tab,reassign_tab,analytics_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Jutalékelemzés","Használat és beállítások"])
 
-def mark_download_started(job, target_count):
-    st.session_state['export_polling'] = True
-    st.session_state['polling_export_job'] = job
-    st.session_state['polling_export_target'] = target_count
-
-
-@st.fragment(run_every="2s" if st.session_state.get('export_polling') else None)
+@st.fragment(run_every="5s")
 def download_status(job):
-    active = st.session_state.get('polling_export_job', job)
-    if (active.completed_count >= st.session_state.get('polling_export_target', active.completed_count+1)
-            and st.session_state.get('export_polling')):
-        st.session_state['export_polling'] = False
-        st.session_state.pop('polling_export_job', None)
-        st.rerun()
-    job = active
+    # This fragment must never rerun the full app: doing so can replace the
+    # deferred download registration before the browser has received its file.
     if job.error:
         st.error('A letöltéshez szükséges mentés nem sikerült: ' + job.error)
     elif job.status:
-        if job.finished: st.success(job.status)
-        else: st.info(job.status)
+        if job.finished:
+            st.success(job.status)
+        else:
+            st.info(job.status)
+    if job.saved and job.reports:
+        st.caption('Ha a letöltés nem indult el automatikusan, a kész fájlokat itt azonnal letöltheted:')
+        stem = filename_stem(job.plan)
+        a,b = st.columns(2)
+        a.download_button('Mentett Excel letöltése',job.reports['report.xlsx'],stem+'.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',on_click='ignore',
+            key='ready_x_'+job.snapshot['id'])
+        b.download_button('Mentett PDF letöltése',job.reports['report.pdf'],stem+'.pdf',
+            mime='application/pdf',on_click='ignore',key='ready_p_'+job.snapshot['id'])
 
 
 def downloads(plan,prefix):
@@ -143,8 +143,8 @@ def downloads(plan,prefix):
     stem = filename_stem(plan)
     a,b = st.columns(2)
     a.download_button('Excel letöltése',lambda: job.download('xlsx'),stem+'.xlsx',
-        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key=key+'_x',on_click=mark_download_started,args=(job,job.completed_count+1))
-    b.download_button('PDF letöltése',lambda: job.download('pdf'),stem+'.pdf',mime='application/pdf',key=key+'_p',on_click=mark_download_started,args=(job,job.completed_count+1))
+        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key=key+'_x',on_click='ignore')
+    b.download_button('PDF letöltése',lambda: job.download('pdf'),stem+'.pdf',mime='application/pdf',key=key+'_p',on_click='ignore')
     st.caption('Letöltéskor a kész Excel, PDF, forrás és hónapbesorolások automatikusan a Drive-ra mentődnek.')
     download_status(job)
 
