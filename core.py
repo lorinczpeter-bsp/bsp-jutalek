@@ -11,12 +11,14 @@ import xml.etree.ElementTree as ET
 import openpyxl
 import requests
 
-CONTACT = "Saját kapcsolattartó"
+CONTACT = "Alvállakozói saját kapcsolattartó"  # Az InnoTMS-export pontos fejléce.
+CONTACT_ALIAS = "Alvállalkozói saját kapcsolattartó"
+LEGACY_CONTACT = "Saját kapcsolattartó"
 MARGIN = "Árrés extra számlasorokkal (állapot szerint)"
 CURRENCY = MARGIN + " pénzneme"
 DATE = "Teljesítés időpontja"
 KEY = "Fuvarszám"
-EXCLUDED = {CONTACT, "Teljesítettség állapota"}
+EXCLUDED = {CONTACT, CONTACT_ALIAS, LEGACY_CONTACT, "Teljesítettség állapota"}
 PERCENT = Decimal("0.10")
 MNB_URL = "https://www.mnb.hu/arfolyamok.asmx"
 NAVY, YELLOW, GRAY = "2A3756", "F2E47D", "D1D5DB"
@@ -48,9 +50,9 @@ def valid_month(month):
 def json_dump(obj):
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, default=str)
 
-def fingerprint(original):
+def fingerprint(original, contact_column=CONTACT):
     # A döntés csak addig érvényes, amíg a dátumok és a kapcsolattartó nem változnak.
-    return hashlib.sha256(json_dump([original.get(KEY), original.get(CONTACT), original.get(DATE)]).encode()).hexdigest()
+    return hashlib.sha256(json_dump([original.get(KEY), original.get(contact_column), original.get(DATE)]).encode()).hexdigest()
 
 def parse_dates(value):
     if isinstance(value, (datetime, date)):
@@ -76,18 +78,24 @@ class Record:
     def months(self):
         return sorted(set(x[:7] for x in self.dates))
 
-def load_workbook(data: bytes):
+def load_workbook(data: bytes, *, contact_field=CONTACT):
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
-    required = {KEY, CONTACT, MARGIN, CURRENCY, DATE}
+    required = {KEY, MARGIN, CURRENCY, DATE}
+    accepted_contacts = (CONTACT, CONTACT_ALIAS) if contact_field == CONTACT else (contact_field,)
     matches = []
     for sheet in wb:
         headers = [str(x or "").strip() for x in next(sheet.iter_rows(values_only=True), [])]
         if required <= set(headers):
-            matches.append((sheet, headers))
+            column = next((h for h in accepted_contacts if h in headers), None)
+            if column is not None:
+                matches.append((sheet, headers, column))
     if len(matches) != 1:
-        raise ValueError("Pontosan egy, a szükséges oszlopokat tartalmazó munkalap szükséges.")
-    sheet, headers = matches[0]
+        wb.close()
+        raise ValueError(f"Pontosan egy, a szükséges oszlopokat tartalmazó munkalap kell. "
+                         f"A jutalékhoz szükséges kapcsolattartó mező: „{contact_field}”.")
+    sheet, headers, contact_column = matches[0]
     if len(headers) != len(set(headers)) or "" in headers:
+        wb.close()
         raise ValueError("Üres vagy ismétlődő oszlopfejléc.")
     records, errors, seen = [], [], set()
     for n, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
@@ -101,14 +109,14 @@ def load_workbook(data: bytes):
             if key in seen:
                 raise ValueError("Ismétlődő fuvarszám; automatikus összesítés nem engedélyezett")
             seen.add(key)
-            contact = str(original.get(CONTACT) or "").strip()
+            contact = str(original.get(contact_column) or "").strip()
             if not contact:
-                raise ValueError("Hiányzó kapcsolattartó")
+                raise ValueError(f"Hiányzó kapcsolattartó a(z) „{contact_column}” oszlopban.")
             currency = str(original.get(CURRENCY) or "").upper().strip()
             if currency not in {"EUR", "HUF"}:
                 raise ValueError("Az árrés pénzneme csak EUR vagy HUF lehet")
             dates = parse_dates(values[headers.index(DATE)])
-            records.append(Record(key, contact, original, dec(original[MARGIN]), currency, dates, fingerprint(original)))
+            records.append(Record(key, contact, original, dec(original[MARGIN]), currency, dates, fingerprint(original, contact_column)))
         except (ValueError, InvalidOperation) as exc:
             errors.append({"Excel-sor": n, "Fuvarszám": key, "Hiba": str(exc)})
     wb.close()

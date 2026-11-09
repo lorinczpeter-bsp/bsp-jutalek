@@ -90,7 +90,7 @@ with st.sidebar:
     st.caption("Árrés extra számlasorokkal • Teljesítés időpontja")
     st.divider()
     st.caption("A hónapdöntések automatikusan mentődnek. Excel vagy PDF letöltésekor a kész állapot a Drive-ra kerül.")
-    st.caption("v2.4.2 · Streamlit web")
+    st.caption("v2.4.3 · Streamlit web")
 
 st.title("Alvállalkozói jutalékelszámolás")
 st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
@@ -132,7 +132,7 @@ def downloads(plan,prefix):
     except ValueError as exc:
         st.error(str(exc)); return
     frozen = settings_backup(store)
-    digest = hashlib.sha256(json_dump({k:v for k,v in plan.items() if k not in ('created','revision')}).encode() + frozen).hexdigest()
+    digest = hashlib.sha256(json_dump({k:v for k,v in plan.items() if k not in ('created','revision')}).encode() + frozen + CONTACT.encode()).hexdigest()
     key = prefix + '_' + today().isoformat() + '_' + digest
     jobs = st.session_state.setdefault('export_jobs', {})
     if key not in jobs:
@@ -240,7 +240,7 @@ with work_tab:
         contacts=sorted(set(r.contact for r in records))
         a,b=st.columns(2)
         month=a.selectbox("Elszámolási hónap",choices,index=choices.index(previous) if previous in choices else len(choices)-1)
-        contact=b.selectbox("Saját kapcsolattartó",contacts)
+        contact=b.selectbox("Alvállalkozói saját kapcsolattartó",contacts)
         try:
             with st.spinner("Elszámolás és MNB-árfolyamok ellenőrzése…"):
                 plan=monthly_plan(st.session_state,store,records,headers,source_hash,month,contact,errors)

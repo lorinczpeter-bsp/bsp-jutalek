@@ -5,7 +5,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from core import today
+from core import CONTACT, today
 from drive_archive import ArchiveError, build_snapshot, compare_snapshots
 from web_session import settings_backup
 from persistence import restore_history
@@ -35,9 +35,10 @@ def check_history(raw, name, store, snapshots, months, rate_provider=None, parse
     resolved = resolved_months(records, store)
     ordered = sorted(snapshots, key=lambda s: s['created'], reverse=True)
     for month in months:
-        candidates = [s for s in ordered if month in s['months']]
+        month_snapshots = [s for s in ordered if month in s['months']]
+        candidates = [s for s in month_snapshots if s.get('contact_field') == CONTACT]
         if not candidates:
-            results.append({'month': month, 'missing': True}); continue
+            results.append({'month': month, 'missing': True, 'legacy_contact': bool(month_snapshots)}); continue
         by_contact = {}
         for snapshot in candidates:
             scope = snapshot.get('contacts')
@@ -79,7 +80,7 @@ def show_auto_check(st, store, raw, name):
         client = archive_client(st)
         if client is None:
             st.info('Az automatikus ellenőrzéshez állítsd be a Drive-archívumot.'); return
-        source_key = (client.folder_id, hashlib.sha256(raw).hexdigest())
+        source_key = (client.folder_id, hashlib.sha256(raw).hexdigest(), CONTACT)
         refresh = st.button('Automatikus ellenőrzés frissítése', key='auto_check_refresh')
         if refresh or st.session_state.get('auto_history_source') != source_key:
             with st.spinner('Korábbi mentések és hónapbesorolások beolvasása…'):
@@ -129,7 +130,9 @@ def show_auto_check(st, store, raw, name):
         with st.expander('Visszaellenőrzés részletei', expanded=bool(changed)):
             for item in results:
                 month = item['month']
-                if item.get('missing'):
+                if item.get('legacy_contact'):
+                    st.write(month + ': a korábbi mentés a régi kapcsolattartómező alapján készült. Új alapot az adott hónap helyes kimutatásának letöltése ad.')
+                elif item.get('missing'):
                     st.write(month + ': nincs korábbi kész kimutatás.')
                 elif item.get('error'):
                     st.write(month + ': nem ellenőrizhető. ' + item['error'])

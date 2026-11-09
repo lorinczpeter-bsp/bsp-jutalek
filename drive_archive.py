@@ -13,11 +13,11 @@ from datetime import datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from core import (CONTACT, CURRENCY, DATE, KEY, MARGIN, build_plan, dec,
+from core import (CONTACT, LEGACY_CONTACT, CURRENCY, DATE, KEY, MARGIN, build_plan, dec,
                   load_workbook, origin, valid_month)
 from web_session import settings_backup
 
-APP_VERSION = '2.4.1'
+APP_VERSION = '2.4.3'
 CALC_VERSION = 'commission-v2-mixed-monthly-fx'
 FORMAT = 'babolna-jutalek-archive-v1'
 MAX_SOURCE = 40 * 1024 * 1024
@@ -118,6 +118,7 @@ def build_snapshot(raw, source_name, store, months, note='', rate_provider=None,
                             'contact': record.contact, 'calculation': calculated.get(record.key)}
     return {
         'format': FORMAT, 'app_version': APP_VERSION, 'calculation_version': CALC_VERSION,
+        'contact_field': CONTACT,
         'id': uuid.uuid4().hex,
         'created': datetime.now(ZoneInfo('Europe/Budapest')).isoformat(timespec='microseconds'),
         'source_name': str(source_name).replace('\\', '/').split('/')[-1][:200],
@@ -196,7 +197,10 @@ def decode_snapshot(data):
                 if type(calc['commission']) is not int or calc['commission'] < 0:
                     raise ValueError()
                 dec(calc['margin_huf']); dec(calc['rate'])
-        _, source_records, source_errors = load_workbook(raw)
+        contact_field = snapshot.get('contact_field', LEGACY_CONTACT)
+        if contact_field not in (CONTACT, LEGACY_CONTACT):
+            raise ValueError()
+        _, source_records, source_errors = load_workbook(raw, contact_field=contact_field)
         if source_errors or {r.key for r in source_records} != set(snapshot['records']):
             raise ValueError()
         if any(canonical(r) != snapshot['records'][r.key]['original'] or
@@ -209,6 +213,8 @@ def decode_snapshot(data):
 
 def compare_snapshots(previous, current, months=None):
     """Compare complete selected periods; missing rows are never called deletions."""
+    if previous.get('contact_field', LEGACY_CONTACT) != current.get('contact_field', LEGACY_CONTACT):
+        raise ArchiveError('A két mentés eltérő kapcsolattartómezőt használ.')
     periods = set(months or previous['months'])
     if not periods <= set(previous['months']) or not periods <= set(current['months']):
         raise ArchiveError('Csak mindkét állapotban ellenőrzött hónapok hasonlíthatók össze.')
@@ -445,6 +451,7 @@ class DriveArchive:
         if snapshot.get('export_contact'):
             metadata['appProperties'].update({
                 'report_month': snapshot['export_month'],
+                'report_contact_field': snapshot.get('contact_field', LEGACY_CONTACT),
                 'report_person': hashlib.sha256(snapshot['export_contact'].encode()).hexdigest()})
         body = (f'--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'.encode() +
                 json.dumps(metadata).encode() +

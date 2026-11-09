@@ -1,36 +1,37 @@
 """Bounded, session-local reuse of source parsing and financial calculations."""
 import hashlib
-from core import load_workbook, build_plan
+from core import CONTACT, load_workbook, build_plan
 
 
 def parsed_source(state, raw):
     digest = hashlib.sha256(raw).hexdigest()
     cached = state.get('source_bundle')
-    if cached is None or cached[0] != digest:
+    if cached is None or cached[0] != digest or state.get('source_contact_field') != CONTACT:
         cached = (digest, *load_workbook(raw))
         state['source_bundle'] = cached
+        state['source_contact_field'] = CONTACT
     return cached
 
 
 def monthly_plan(state, store, records, headers, source_hash, month, contact, errors):
-    signature = (source_hash, month, contact, store.revision())
+    signature = (source_hash, month, contact, CONTACT, store.revision())
     cached = state.get('monthly_plan_cache')
     if cached is None or cached[0] != signature:
         plan = build_plan(records, headers, store, month, contact, source_hash, errors=errors, snapshot=True)
         if store.revision() != signature[-1]:
             plan = build_plan(records, headers, store, month, contact, source_hash, errors=errors, snapshot=True)
-        state['monthly_plan_cache'] = ((source_hash, month, contact, store.revision()), plan)
+        state['monthly_plan_cache'] = ((source_hash, month, contact, CONTACT, store.revision()), plan)
     return state['monthly_plan_cache'][1]
 
 
 def cached_analytics(state, store, source_hash, records, headers, months, contacts, calculate):
-    signature = (source_hash, tuple(sorted(months)), tuple(sorted(contacts)), store.revision())
+    signature = (source_hash, tuple(sorted(months)), tuple(sorted(contacts)), CONTACT, store.revision())
     cached = state.get('analytics_cache')
     if cached is None or cached[0] != signature:
         result = calculate(records, headers, store, months, contacts)
         if store.revision() != signature[-1]:
             result = calculate(records, headers, store, months, contacts)
-        state['analytics_cache'] = ((source_hash, tuple(sorted(months)), tuple(sorted(contacts)), store.revision()), result)
+        state['analytics_cache'] = ((source_hash, tuple(sorted(months)), tuple(sorted(contacts)), CONTACT, store.revision()), result)
     return state['analytics_cache'][1]
 
 
@@ -43,11 +44,12 @@ def relevant_archives(files, months):
     for index, file in enumerate(files):
         properties = file.get('appProperties', {})
         month, person = properties.get('report_month'), properties.get('report_person')
+        scope = (month, person, properties.get('report_contact_field'))
         if not month or not person:
             selected.append(file)
-        elif (month in months and (month,person) not in seen) or index == 0:
+        elif (month in months and scope not in seen) or index == 0:
             selected.append(file)
-        seen.add((month, person))
+        seen.add(scope)
     return selected
 
 
