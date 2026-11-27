@@ -16,7 +16,67 @@ from runtime_cache import parsed_source, monthly_plan
 from settlement import resolved_months
 
 ROOT=Path(__file__).parent
-st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo_ui.png"),layout="wide")
+st.set_page_config(page_title="Jutalékelszámolás | Bábolna Sped",page_icon=str(ROOT/"assets"/"logo_ui.png"),layout="wide",
+                   initial_sidebar_state="collapsed")
+NAVY,YELLOW,BG,BORDER,MUTED="#2A3756","#F2E47D","#F4F5F8","#E3E6EC","#5B6475"
+
+def asset64(name):
+    return base64.b64encode((ROOT/"assets"/name).read_bytes()).decode()
+
+def brand():
+    """A2 arculat: navy felső sáv logóval és morzsamenüvel, teljes szélességű tartalom."""
+    st.markdown("<style>"
+        "@font-face{font-family:Fira;src:url(data:font/ttf;base64,"+asset64("FiraSans-Regular.ttf")+")}"
+        "@font-face{font-family:Fira;font-weight:700;src:url(data:font/ttf;base64,"+asset64("FiraSans-Bold.ttf")+")}"
+        "@font-face{font-family:Montserrat;src:url(data:font/ttf;base64,"+asset64("Montserrat.ttf")+")}"
+        f"""
+html,body,[class*="css"],.stApp{{font-family:Fira,sans-serif;color:#1F2937}}
+.stApp{{background:{BG}}}
+header[data-testid="stHeader"]{{display:none}}
+[data-testid="stSidebar"],[data-testid="collapsedControl"]{{display:none}}
+.block-container{{padding-top:0;max-width:1360px}}
+h1,h2,h3,h4{{font-family:Montserrat,sans-serif!important;color:{NAVY}}}
+h2,h3{{font-size:22px!important}}
+.topbar{{background:{NAVY};color:#fff;margin:0 calc(50% - 50vw) 24px;padding:0 calc(50vw - 50% + 1rem)}}
+.topbar-in{{min-height:64px;display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px}}
+.topbar img{{height:40px;background:#fff;border-radius:8px;padding:2px}}
+.crumb{{display:flex;align-items:center;gap:10px;font-size:14px}}
+.crumb .apps{{background:rgba(255,255,255,.08);padding:9px 14px;border-radius:10px}}
+.crumb .sep{{color:#7D88A3}} .crumb .cur{{color:{YELLOW};font-weight:600}}
+.pagehead h1{{margin:0;font-size:28px;letter-spacing:-.01em}}
+.pagehead p{{margin:4px 0 0;color:{MUTED};font-size:14px}}
+.pill{{display:inline-block;font-size:12px;font-weight:600;color:{NAVY};background:{YELLOW};
+       padding:3px 10px;border-radius:999px;margin-right:6px}}
+.kpi,[data-testid="stMetric"]{{background:#fff;border:1px solid {BORDER};border-radius:14px;padding:18px 20px;height:100%;
+      display:flex;flex-direction:column;gap:8px}}
+.kpi.dark{{background:{NAVY};border-color:{NAVY};color:#fff}}
+.kpi .l,[data-testid="stMetricLabel"] p{{font-size:13px;color:{MUTED}}} .kpi.dark .l{{color:#C9D0DF}}
+.kpi .v,[data-testid="stMetricValue"]{{font-family:Montserrat,sans-serif;font-weight:700;font-size:30px;color:{NAVY};
+         font-variant-numeric:tabular-nums;letter-spacing:-.02em}}
+.kpi.dark .v{{color:#fff}}
+.kpi .s{{font-size:12px;color:{MUTED}}} .kpi.dark .s{{color:#C9D0DF}}
+.kpi.hl{{background:#FFFBEA;border-color:#DCC846}}
+[data-testid="stTabs"] button[role="tab"]{{font-size:15px;height:44px}}
+[data-testid="stTabs"] [aria-selected="true"]{{color:{NAVY};font-weight:600}}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"]{{background:{NAVY}}}
+[data-testid="stAlert"]{{border-radius:12px}}
+[data-testid="stExpander"],[data-testid="stFileUploader"]{{background:#fff;border-radius:12px}}
+[data-testid="stExpander"] summary p{{font-family:Montserrat,sans-serif;font-weight:600;font-size:17px;color:{NAVY}}}
+.rate-strip{{padding:16px 20px;border:1px solid {BORDER};background:white;border-radius:12px;margin:14px 0}}
+div.stButton>button[kind="primary"],div.stDownloadButton>button{{background:{YELLOW};color:{NAVY};
+    border:0;border-radius:10px;font-weight:600;min-height:44px}}
+.foot{{color:{MUTED};font-size:12px;margin-top:28px;border-top:1px solid {BORDER};padding-top:10px}}
+</style>""",unsafe_allow_html=True)
+    st.markdown(f"""<div class="topbar"><div class="topbar-in">
+      <img src="data:image/png;base64,{asset64('logo_ui.png')}" alt="Bábolna Sped">
+      <div class="crumb"><span class="apps">Alkalmazások</span><span class="sep">/</span>
+      <span class="cur">Jutalékelszámolás</span></div></div></div>""",unsafe_allow_html=True)
+
+def kpi(col,label,value,sub="",style=""):
+    col.markdown(f'<div class="kpi {style}"><span class="l">{label}</span><span class="v">{value}</span>'
+                 +(f'<span class="s">{sub}</span>' if sub else "")+'</div>',unsafe_allow_html=True)
+
+brand()
 
 def auth():
     password=os.environ.get("JUTALEK_PASSWORD","")
@@ -34,8 +94,8 @@ def auth():
             st.stop()
         return
     if not st.session_state.get("authenticated"):
-        st.image(str(ROOT/"assets"/"logo_ui.png"),width=240)
-        st.title("Jutalékelszámolás")
+        st.markdown('<div class="pagehead"><h1>Jutalékelszámolás</h1><p>Belépés szükséges</p></div>',unsafe_allow_html=True)
+        st.write("")
         entered=st.text_input("Belépési jelszó",type="password")
         if st.button("Belépés",type="primary"):
             if hmac.compare_digest(entered,password):
@@ -44,56 +104,13 @@ def auth():
             else:st.error("Hibás jelszó.")
         st.stop()
 auth()
-def asset64(name):
-    return base64.b64encode((ROOT/"assets"/name).read_bytes()).decode()
-st.markdown("""
-<style>
-@font-face{font-family:Fira;src:url(data:font/ttf;base64,"""+asset64("FiraSans-Regular.ttf")+""")}
-@font-face{font-family:Montserrat;src:url(data:font/ttf;base64,"""+asset64("Montserrat.ttf")+""")}
-html,body,[class*="css"],.stApp{font-family:Fira,sans-serif;color:#2A3756}
-.stApp{background:#F6F7F9}
-h1,h2,h3{font-family:Montserrat,sans-serif!important;color:#2A3756}
-[data-testid="stSidebar"]{background:#FFFFFF;border-right:1px solid #D1D5DB}
-[data-testid="stSidebar"] [data-testid="stImage"]{background:white;padding:8px;border-radius:8px}
-[data-testid="stSidebar"] p,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] label{color:#2A3756}
-[data-testid="stMetric"]{background:white;padding:22px;border-radius:14px;border:1px solid #D1D5DB}
-[data-testid="stMetricValue"]{font-size:30px;font-weight:700;letter-spacing:-0.5px}
-[data-testid="stMetricLabel"]{font-size:13px;color:#657087}
-[data-testid="stFileUploader"]{background:white;padding:18px;border:1px solid #D1D5DB;border-radius:14px}
-button[data-baseweb="tab"]{border-radius:9px;padding:10px 18px}
-button[data-baseweb="tab"][aria-selected="true"]{background:#F2E47D;color:#2A3756}
-[data-testid="stAlert"]{border-radius:12px}
-.report-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:12px 0 18px}
-.report-card{border:1px solid #D1D5DB;border-radius:14px;background:white;padding:24px}
-.report-card.highlight{background:#FFFBEA;border-color:#DCC846}
-.report-card p{margin:0 0 18px;font-size:14px;font-weight:600}
-.report-card strong{display:block;font:700 30px Montserrat,sans-serif;letter-spacing:-0.5px}
-.report-card small{display:block;margin-top:12px;color:#657087;font-size:12px}
-.report-total{background:#2A3756;border-radius:14px;padding:24px;color:white;margin:4px 0 20px}
-.report-total span{display:block;color:#F2E47D;font-size:11px;letter-spacing:1.5px;text-transform:uppercase}
-.report-total strong{font:700 29px Montserrat,sans-serif}
-.rate-strip{padding:16px 20px;border:1px solid #D1D5DB;background:white;border-radius:10px;margin:14px 0}
-@media(max-width:700px){.report-cards{grid-template-columns:1fr}.report-card strong{font-size:24px}}
-div.stButton>button[kind="primary"]{background:#F2E47D;color:#2A3756;border:0;font-weight:700}
-div.stDownloadButton>button{border:1px solid #D1D5DB;border-radius:9px;background:#F2E47D;color:#2A3756;padding:12px 24px}
-.block-container{padding-top:2rem;max-width:1700px}
-.brandbar{background:#2A3756;color:white;padding:16px 24px;border-radius:12px;margin-bottom:22px}
-.brandbar span{color:#F2E47D}
-</style>""",unsafe_allow_html=True)
 
 store=session_store(st.session_state)
-with st.sidebar:
-    st.image(str(ROOT/"assets"/"logo_ui.png"),width=230)
-    st.markdown("## Jutalékelszámolás")
-    st.caption("ALVÁLLALKOZÓI FUVAROK")
-    st.markdown("**10% jutalék · HUF elszámolás**")
-    st.caption("Árrés extra számlasorokkal • Teljesítés időpontja")
-    st.divider()
-    st.caption("A hónapdöntések automatikusan mentődnek. Excel vagy PDF letöltésekor a kész állapot a Drive-ra kerül.")
-    st.caption("v2.4.3 · Streamlit web")
-
-st.title("Alvállalkozói jutalékelszámolás")
-st.caption("Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.")
+st.markdown('<div class="pagehead"><h1>Alvállalkozói jutalékelszámolás</h1>'
+            '<p><span class="pill">10% jutalék · HUF elszámolás</span>'
+            'Válassz hónapot és kapcsolattartót, majd töltsd le az aktuális kimutatást. Nincs havi lezárás.</p></div>',
+            unsafe_allow_html=True)
+st.write("")
 feedback=st.session_state.pop("decision_feedback",None)
 if feedback:st.success(feedback)
 work_tab,reassign_tab,analytics_tab,help_tab=st.tabs(["Kimutatás készítése","Fuvar átsorolása","Jutalékelemzés","Használat és beállítások"])
@@ -213,8 +230,9 @@ A folyamatban lévő hónap teljes havi árfolyama még nem ismert. Hiányos kim
                 else:st.success("Árfolyam elmentve.")
 
 with work_tab:
-    uploaded=st.file_uploader("Fuvarlista feltöltése",type=["xlsx"],
-        help="A teljes eredeti exportot töltsd fel, a Fuvarlista munkalappal.")
+    with st.expander("Forrásfájl",expanded=True):
+        uploaded=st.file_uploader("Fuvarlista feltöltése",type=["xlsx"],
+            help="A teljes eredeti exportot töltsd fel, a Fuvarlista munkalappal.")
     if uploaded:
         raw=uploaded.getvalue()
         st.session_state.source_raw=raw
@@ -238,9 +256,10 @@ with work_tab:
         from datetime import timedelta
         previous=(today().replace(day=1)-timedelta(days=1)).strftime("%Y-%m")
         contacts=sorted(set(r.contact for r in records))
-        a,b=st.columns(2)
-        month=a.selectbox("Elszámolási hónap",choices,index=choices.index(previous) if previous in choices else len(choices)-1)
-        contact=b.selectbox("Alvállalkozói saját kapcsolattartó",contacts)
+        with st.expander("Elszámolási hónap és kapcsolattartó",expanded=True):
+            a,b=st.columns(2)
+            month=a.selectbox("Elszámolási hónap",choices,index=choices.index(previous) if previous in choices else len(choices)-1)
+            contact=b.selectbox("Alvállalkozói saját kapcsolattartó",contacts)
         try:
             with st.spinner("Elszámolás és MNB-árfolyamok ellenőrzése…"):
                 plan=monthly_plan(st.session_state,store,records,headers,source_hash,month,contact,errors)
@@ -253,9 +272,10 @@ with work_tab:
         with inspect_tab:
             metrics=st.columns(3 if negatives else 2)
             a,c=metrics[0],metrics[-1]
-            a.metric("Több hónapos, döntésre vár",len(unresolved))
-            if negatives:metrics[1].metric("Negatív árrés",len(negatives))
-            c.metric("Hibás importált sor",len(errors))
+            kpi(a,"Több hónapos, döntésre vár",len(unresolved),style="dark")
+            if negatives:kpi(metrics[1],"Negatív árrés",len(negatives))
+            kpi(c,"Hibás importált sor",len(errors))
+            st.write("")
             if errors:st.error("Hibás importált sorok: a kimutatás hiányos lehet, javítsd a forrást.");st.dataframe(pd.DataFrame(errors),hide_index=True)
             if unresolved:
                 st.warning("Válassz hónapot a még ellenőrizendő fuvarokhoz.")
@@ -290,10 +310,11 @@ with work_tab:
         st.subheader(f"{month} · {contact}")
         from html import escape
         margin=sum(dec(x["margin_huf"]) for x in plan["lines"])
-        st.markdown('<div class="report-cards">'
-            '<div class="report-card"><p>Elszámolt fuvarok</p><strong>'+ft(len(plan["lines"]))+' db</strong><small>A kiválasztott hónap és kapcsolattartó tételei</small></div>'
-            '<div class="report-card highlight"><p>Árrés extrákkal</p><strong>'+ft(margin)+' Ft</strong><small>Pozitív és negatív árrések összege; jutalék csak a pozitív tételekre.</small></div></div>'
-            '<div class="report-total"><span>Jutalék összesen</span><strong>'+ft(plan["total"])+' Ft</strong></div>',unsafe_allow_html=True)
+        rk=st.columns(3)
+        kpi(rk[0],"Jutalék összesen",ft(plan["total"])+" Ft",style="dark")
+        kpi(rk[1],"Elszámolt fuvarok",ft(len(plan["lines"]))+" db","A kiválasztott hónap és kapcsolattartó tételei")
+        kpi(rk[2],"Árrés extrákkal",ft(margin)+" Ft","Pozitív és negatív árrések összege; jutalék csak a pozitív tételekre.",style="hl")
+        st.write("")
         for m,r in sorted(plan["rates"].items()):
             st.markdown('<div class="rate-strip"><b>MNB EUR/HUF</b> &nbsp; '+escape(m)+' havi átlag <b style="float:right">'+ft(r["rate"],2)+' Ft/EUR</b></div>',unsafe_allow_html=True)
         for msg in plan["blockers"]:st.error(msg)
@@ -309,3 +330,5 @@ with work_tab:
 bundle=st.session_state.get("source_bundle")
 with reassign_tab:show_reassign(st,store,bundle)
 with analytics_tab:show_analytics(st,store,bundle)
+st.markdown('<div class="foot">Árrés extra számlasorokkal • Teljesítés időpontja · A hónapdöntések automatikusan mentődnek. '
+            'Excel vagy PDF letöltésekor a kész állapot a Drive-ra kerül. · v2.4.3 · Streamlit web</div>',unsafe_allow_html=True)
